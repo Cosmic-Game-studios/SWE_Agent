@@ -1,0 +1,23 @@
+[package]
+name = "swe-cli"
+description = "The `swe` command: serve the UI, run headless tasks, manage providers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "swe"
+path = "src/main.rs"
+
+[dependencies]
+swe-protocol.workspace = true
+swe-llm.workspace = true
+swe-core.workspace = true
+swe-server.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

@@ -1,0 +1,61 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/swe-protocol",
+    "crates/swe-llm",
+    "crates/swe-tools",
+    "crates/swe-core",
+    "crates/swe-server",
+    "crates/swe-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+repository = "https://github.com/Cosmic-Game-studios/SWE_Agent"
+
+[workspace.dependencies]
+swe-protocol = { path = "crates/swe-protocol" }
+swe-llm = { path = "crates/swe-llm" }
+swe-tools = { path = "crates/swe-tools" }
+swe-core = { path = "crates/swe-core" }
+swe-server = { path = "crates/swe-server" }
+
+anyhow = "1"
+async-trait = "0.1"
+axum = { version = "0.8", features = ["macros"] }
+base64 = "0.22"
+bytes = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+clap = { version = "4", features = ["derive", "env"] }
+dirs = "6"
+futures = "0.3"
+globset = "0.4"
+ignore = "0.4"
+mime_guess = "2"
+regex = "1"
+reqwest = { version = "0.13", features = ["json", "query", "stream"] }
+rust-embed = { version = "8", features = ["interpolate-folder-path"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+similar = "2"
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+toml = "0.9"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 16
+strip = true
+
+[profile.dev]
+debug = "line-tables-only"
