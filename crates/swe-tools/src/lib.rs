@@ -52,6 +52,8 @@ pub struct ToolContext {
     pub output: OutputSink,
     /// Background processes of the session.
     pub shell: Arc<ShellManager>,
+    /// Id of the tool call being executed; empty outside an agent loop.
+    pub call_id: String,
 }
 
 impl ToolContext {
@@ -62,6 +64,7 @@ impl ToolContext {
             cancel: CancellationToken::new(),
             output: OutputSink::none(),
             shell: Arc::new(ShellManager::new()),
+            call_id: String::new(),
         }
     }
 
