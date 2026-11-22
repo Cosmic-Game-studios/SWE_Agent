@@ -31,7 +31,11 @@ const MAX_BACKGROUND_BUFFER: usize = 1_000_000;
 fn shell_command(command: &str, cwd: &Path) -> Command {
     #[cfg(unix)]
     let mut cmd = {
-        let shell = if Path::new("/bin/bash").exists() || Path::new("/usr/bin/bash").exists() { "bash" } else { "sh" };
+        let shell = if Path::new("/bin/bash").exists() || Path::new("/usr/bin/bash").exists() {
+            "bash"
+        } else {
+            "sh"
+        };
         let mut cmd = Command::new(shell);
         cmd.arg("-c").arg(command);
         // Own process group: lets us signal the whole tree.
@@ -103,12 +107,7 @@ impl Capture {
 }
 
 /// Copy a pipe into the capture (and the live sink) until it closes.
-async fn pump(
-    mut reader: impl AsyncRead + Unpin,
-    capture: Arc<Mutex<Capture>>,
-    sink: OutputSink,
-    cap: usize,
-) {
+async fn pump(mut reader: impl AsyncRead + Unpin, capture: Arc<Mutex<Capture>>, sink: OutputSink, cap: usize) {
     let mut buffer = vec![0u8; 8192];
     let mut pending: Vec<u8> = Vec::new();
     loop {
@@ -162,7 +161,9 @@ impl ShellManager {
     }
 
     fn spawn_background(&self, command: &str, cwd: &Path) -> Result<String, String> {
-        let mut child = shell_command(command, cwd).spawn().map_err(|err| format!("Cannot start command: {err}"))?;
+        let mut child = shell_command(command, cwd)
+            .spawn()
+            .map_err(|err| format!("Cannot start command: {err}"))?;
         let capture = Arc::new(Mutex::new(Capture::default()));
         let exit = Arc::new(Mutex::new(None));
         let (kill_tx, mut kill_rx) = tokio::sync::mpsc::channel::<()>(1);
@@ -241,7 +242,9 @@ impl ShellManager {
 
     fn kill(&self, id: &str) -> Result<String, String> {
         let processes = self.processes.lock().unwrap();
-        let process = processes.get(id).ok_or_else(|| unknown_process(id, &processes_list(&processes)))?;
+        let process = processes
+            .get(id)
+            .ok_or_else(|| unknown_process(id, &processes_list(&processes)))?;
         if process.exit.lock().unwrap().is_some() {
             return Ok(format!("{id} had already exited."));
         }
@@ -369,7 +372,11 @@ impl Tool for Bash {
             };
         }
 
-        let timeout = Duration::from_millis(args.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS).clamp(1_000, MAX_TIMEOUT_MS));
+        let timeout = Duration::from_millis(
+            args.timeout_ms
+                .unwrap_or(DEFAULT_TIMEOUT_MS)
+                .clamp(1_000, MAX_TIMEOUT_MS),
+        );
         let mut child = match shell_command(&args.command, &ctx.cwd).spawn() {
             Ok(child) => child,
             Err(err) => return ToolOutput::error(format!("Cannot start command: {err}")),
@@ -377,8 +384,18 @@ impl Tool for Bash {
         let capture = Arc::new(Mutex::new(Capture::default()));
         // Keep more than we return so truncation can preserve the head as well.
         let cap = MAX_OUTPUT_BYTES * 8;
-        let stdout = tokio::spawn(pump(child.stdout.take().expect("piped"), capture.clone(), ctx.output.clone(), cap));
-        let stderr = tokio::spawn(pump(child.stderr.take().expect("piped"), capture.clone(), ctx.output.clone(), cap));
+        let stdout = tokio::spawn(pump(
+            child.stdout.take().expect("piped"),
+            capture.clone(),
+            ctx.output.clone(),
+            cap,
+        ));
+        let stderr = tokio::spawn(pump(
+            child.stderr.take().expect("piped"),
+            capture.clone(),
+            ctx.output.clone(),
+            cap,
+        ));
 
         enum End {
             Exited(Option<i32>),
@@ -413,11 +430,25 @@ impl Tool for Bash {
         body.push_str(&truncate_middle(text.trim_end(), MAX_OUTPUT_BYTES));
 
         let (content, is_error, exit_code) = match end {
-            End::Exited(Some(0)) => {
-                (if body.is_empty() { "(no output)".to_string() } else { body }, false, Some(0))
-            }
-            End::Exited(Some(code)) => (format!("{body}\n[exit code {code}]").trim_start().to_string(), true, Some(code)),
-            End::Exited(None) => (format!("{body}\n[terminated by a signal]").trim_start().to_string(), true, None),
+            End::Exited(Some(0)) => (
+                if body.is_empty() {
+                    "(no output)".to_string()
+                } else {
+                    body
+                },
+                false,
+                Some(0),
+            ),
+            End::Exited(Some(code)) => (
+                format!("{body}\n[exit code {code}]").trim_start().to_string(),
+                true,
+                Some(code),
+            ),
+            End::Exited(None) => (
+                format!("{body}\n[terminated by a signal]").trim_start().to_string(),
+                true,
+                None,
+            ),
             End::TimedOut => (
                 format!(
                     "{body}\n[timed out after {}s and was stopped; pass a larger timeout_ms, or use \
@@ -429,9 +460,18 @@ impl Tool for Bash {
                 true,
                 None,
             ),
-            End::Cancelled => (format!("{body}\n[stopped by the user]").trim_start().to_string(), true, None),
+            End::Cancelled => (
+                format!("{body}\n[stopped by the user]").trim_start().to_string(),
+                true,
+                None,
+            ),
         };
-        ToolOutput { content, is_error, display: None }.with_display(ToolDisplay::Command {
+        ToolOutput {
+            content,
+            is_error,
+            display: None,
+        }
+        .with_display(ToolDisplay::Command {
             command: args.command,
             exit_code,
             background_id: None,
@@ -495,8 +535,7 @@ impl Tool for KillProcess {
     }
 
     fn description(&self) -> String {
-        "Stop a background command started with bash and `background: true`, including its child processes."
-            .to_string()
+        "Stop a background command started with bash and `background: true`, including its child processes.".to_string()
     }
 
     fn input_schema(&self) -> Value {
@@ -544,7 +583,10 @@ mod tests {
         assert!(!ok.is_error, "{}", ok.content);
         assert!(ok.content.contains("marker.txt"));
         assert!(ok.content.contains("err"), "stderr is captured too");
-        assert!(matches!(ok.display, Some(ToolDisplay::Command { exit_code: Some(0), .. })));
+        assert!(matches!(
+            ok.display,
+            Some(ToolDisplay::Command { exit_code: Some(0), .. })
+        ));
 
         let failed = Bash.run(json!({"command": "echo boom; exit 3"}), &ctx(&dir)).await;
         assert!(failed.is_error);
@@ -560,13 +602,18 @@ mod tests {
         let started = Instant::now();
         // The backgrounded grandchild would keep running if only the shell was killed.
         let out = Bash
-            .run(json!({"command": "(sleep 30; touch survived) & echo started; sleep 30", "timeout_ms": 1000}), &ctx(&dir))
+            .run(
+                json!({"command": "(sleep 30; touch survived) & echo started; sleep 30", "timeout_ms": 1000}),
+                &ctx(&dir),
+            )
             .await;
         assert!(out.is_error);
         assert!(out.content.contains("started"));
         assert!(out.content.contains("timed out after 1s"));
         assert!(started.elapsed() < Duration::from_secs(10));
-        let leftovers = std::process::Command::new("pgrep").args(["-f", "touch survived"]).output();
+        let leftovers = std::process::Command::new("pgrep")
+            .args(["-f", "touch survived"])
+            .output();
         if let Ok(output) = leftovers {
             assert!(output.stdout.is_empty(), "grandchild still alive");
         }
@@ -613,7 +660,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let ctx = ctx(&dir);
         let started = Bash
-            .run(json!({"command": "echo ready; sleep 30; echo never", "background": true}), &ctx)
+            .run(
+                json!({"command": "echo ready; sleep 30; echo never", "background": true}),
+                &ctx,
+            )
             .await;
         assert!(!started.is_error, "{}", started.content);
         assert!(matches!(&started.display, Some(ToolDisplay::Command { background_id: Some(id), .. }) if id == "bg1"));
@@ -629,7 +679,10 @@ mod tests {
         assert!(first.contains("running"), "{first}");
         assert!(first.contains("ready"), "{first}");
         let second = BashOutput.run(json!({"id": "bg1"}), &ctx).await.content;
-        assert!(second.contains("(no new output)"), "output is only returned once: {second}");
+        assert!(
+            second.contains("(no new output)"),
+            "output is only returned once: {second}"
+        );
         assert_eq!(ctx.shell.running().len(), 1);
 
         let killed = KillProcess.run(json!({"id": "bg1"}), &ctx).await;
@@ -641,7 +694,13 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         assert!(ctx.shell.running().is_empty());
-        assert!(BashOutput.run(json!({"id": "bg1"}), &ctx).await.content.contains("terminated by a signal"));
+        assert!(
+            BashOutput
+                .run(json!({"id": "bg1"}), &ctx)
+                .await
+                .content
+                .contains("terminated by a signal")
+        );
         assert!(BashOutput.run(json!({"id": "bg9"}), &ctx).await.is_error);
     }
 }

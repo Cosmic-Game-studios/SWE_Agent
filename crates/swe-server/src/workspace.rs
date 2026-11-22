@@ -72,7 +72,11 @@ pub async fn list_directories(Query(query): Query<FsQuery>) -> Result<Json<DirLi
                 return None;
             }
             let full = entry.path();
-            Some(DirEntry { is_git: full.join(".git").exists(), path: full.to_string_lossy().into_owned(), name })
+            Some(DirEntry {
+                is_git: full.join(".git").exists(),
+                path: full.to_string_lossy().into_owned(),
+                name,
+            })
         })
         .collect();
     entries.sort_by_key(|entry| entry.name.to_lowercase());
@@ -112,7 +116,12 @@ async fn git(dir: &Path, args: &[&str]) -> Option<Vec<u8>> {
 pub async fn diff(workspace: &Path) -> WorkspaceDiff {
     let inside = git(workspace, &["rev-parse", "--is-inside-work-tree"]).await;
     if inside.as_deref().map(|out| out.trim_ascii()) != Some(b"true".as_slice()) {
-        return WorkspaceDiff { is_git: false, branch: None, diff: String::new(), truncated: false };
+        return WorkspaceDiff {
+            is_git: false,
+            branch: None,
+            diff: String::new(),
+            truncated: false,
+        };
     }
     let branch = git(workspace, &["rev-parse", "--abbrev-ref", "HEAD"])
         .await
@@ -126,15 +135,23 @@ pub async fn diff(workspace: &Path) -> WorkspaceDiff {
     } else {
         &["diff", "--cached", "--no-color", "--no-ext-diff", "--relative"]
     };
-    let mut diff = git(workspace, base).await.map(|out| String::from_utf8_lossy(&out).into_owned()).unwrap_or_default();
+    let mut diff = git(workspace, base)
+        .await
+        .map(|out| String::from_utf8_lossy(&out).into_owned())
+        .unwrap_or_default();
 
     // `git diff` ignores untracked files, which is exactly what a new file is.
     if let Some(listing) = git(workspace, &["ls-files", "--others", "--exclude-standard", "-z"]).await {
-        let names = listing.split(|byte| *byte == 0).filter(|name| !name.is_empty()).take(MAX_UNTRACKED_FILES);
+        let names = listing
+            .split(|byte| *byte == 0)
+            .filter(|name| !name.is_empty())
+            .take(MAX_UNTRACKED_FILES);
         for name in names {
             let name = String::from_utf8_lossy(name).into_owned();
             let file = workspace.join(&name);
-            let Ok(metadata) = std::fs::metadata(&file) else { continue };
+            let Ok(metadata) = std::fs::metadata(&file) else {
+                continue;
+            };
             if !metadata.is_file() {
                 continue;
             }
@@ -142,7 +159,9 @@ pub async fn diff(workspace: &Path) -> WorkspaceDiff {
             let text = if metadata.len() > MAX_UNTRACKED_FILE_BYTES {
                 None
             } else {
-                std::fs::read(&file).ok().and_then(|bytes| String::from_utf8(bytes).ok())
+                std::fs::read(&file)
+                    .ok()
+                    .and_then(|bytes| String::from_utf8(bytes).ok())
             };
             match text {
                 Some(text) if !text.is_empty() => {
@@ -157,7 +176,9 @@ pub async fn diff(workspace: &Path) -> WorkspaceDiff {
                 }
                 Some(_) => diff.push_str(&header),
                 None => {
-                    diff.push_str(&format!("diff --git a/{name} b/{name}\nnew file mode 100644\nBinary or large file {name} (not shown)\n"));
+                    diff.push_str(&format!(
+                        "diff --git a/{name} b/{name}\nnew file mode 100644\nBinary or large file {name} (not shown)\n"
+                    ));
                 }
             }
             if diff.len() > MAX_DIFF_BYTES {
@@ -174,5 +195,10 @@ pub async fn diff(workspace: &Path) -> WorkspaceDiff {
         }
         diff.truncate(cut);
     }
-    WorkspaceDiff { is_git: true, branch, diff, truncated }
+    WorkspaceDiff {
+        is_git: true,
+        branch,
+        diff,
+        truncated,
+    }
 }

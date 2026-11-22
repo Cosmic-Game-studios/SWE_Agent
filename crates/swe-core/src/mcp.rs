@@ -89,7 +89,9 @@ impl Client {
         tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                let Ok(message) = serde_json::from_str::<Value>(&line) else { continue };
+                let Ok(message) = serde_json::from_str::<Value>(&line) else {
+                    continue;
+                };
                 let id = message.get("id").cloned();
                 if message.get("method").is_some() {
                     if let Some(id) = id {
@@ -102,7 +104,9 @@ impl Client {
                     }
                     continue;
                 }
-                let Some(id) = id.and_then(|id| id.as_u64()) else { continue };
+                let Some(id) = id.and_then(|id| id.as_u64()) else {
+                    continue;
+                };
                 if let Some(waiter) = reader.pending.lock().unwrap().remove(&id) {
                     let result = match message.get("error") {
                         Some(error) => Err(error["message"].as_str().unwrap_or("MCP error").to_string()),
@@ -131,7 +135,9 @@ impl Client {
         if !init.is_object() {
             return Err("unexpected initialize response".to_string());
         }
-        client.write(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"})).await?;
+        client
+            .write(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}))
+            .await?;
         Ok(client)
     }
 
@@ -139,15 +145,24 @@ impl Client {
         let mut line = message.to_string();
         line.push('\n');
         let mut stdin = self.stdin.lock().await;
-        stdin.write_all(line.as_bytes()).await.map_err(|err| format!("cannot write to the MCP server: {err}"))?;
-        stdin.flush().await.map_err(|err| format!("cannot write to the MCP server: {err}"))
+        stdin
+            .write_all(line.as_bytes())
+            .await
+            .map_err(|err| format!("cannot write to the MCP server: {err}"))?;
+        stdin
+            .flush()
+            .await
+            .map_err(|err| format!("cannot write to the MCP server: {err}"))
     }
 
     async fn request(&self, method: &str, params: Value, timeout: Duration) -> Result<Value, String> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         self.pending.lock().unwrap().insert(id, tx);
-        if let Err(err) = self.write(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})).await {
+        if let Err(err) = self
+            .write(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}))
+            .await
+        {
             self.pending.lock().unwrap().remove(&id);
             return Err(err);
         }
@@ -212,7 +227,11 @@ impl Tool for McpTool {
     fn kind(&self) -> ToolKind {
         // Servers may declare a tool read-only; everything else is treated
         // as acting on the outside world and asks first.
-        if self.read_only { ToolKind::Read } else { ToolKind::Execute }
+        if self.read_only {
+            ToolKind::Read
+        } else {
+            ToolKind::Execute
+        }
     }
 
     fn summarize(&self, input: &Value) -> String {
@@ -220,7 +239,11 @@ impl Tool for McpTool {
     }
 
     async fn run(&self, input: Value, ctx: &ToolContext) -> ToolOutput {
-        let call = self.client.request("tools/call", json!({"name": self.remote, "arguments": input}), CALL_TIMEOUT);
+        let call = self.client.request(
+            "tools/call",
+            json!({"name": self.remote, "arguments": input}),
+            CALL_TIMEOUT,
+        );
         let result = tokio::select! {
             result = call => result,
             _ = ctx.cancel.cancelled() => return ToolOutput::error("[stopped by the user]"),
@@ -235,18 +258,22 @@ impl Tool for McpTool {
                     }
                     match part["type"].as_str().unwrap_or_default() {
                         "text" => text.push_str(part["text"].as_str().unwrap_or_default()),
-                        "resource" => text.push_str(
-                            part["resource"]["text"].as_str().unwrap_or("[binary resource omitted]"),
-                        ),
+                        "resource" => {
+                            text.push_str(part["resource"]["text"].as_str().unwrap_or("[binary resource omitted]"))
+                        }
                         other => text.push_str(&format!("[{other} content omitted]")),
                     }
                 }
-                if text.is_empty() {
-                    if let Some(structured) = result.get("structuredContent") {
-                        text = structured.to_string();
-                    }
+                if text.is_empty()
+                    && let Some(structured) = result.get("structuredContent")
+                {
+                    text = structured.to_string();
                 }
-                ToolOutput { content: text, is_error: result["isError"] == true, display: None }
+                ToolOutput {
+                    content: text,
+                    is_error: result["isError"] == true,
+                    display: None,
+                }
             }
         }
     }
@@ -255,7 +282,15 @@ impl Tool for McpTool {
 /// Tool names must fit every provider: `[A-Za-z0-9_-]`, at most 64 characters.
 fn exposed_name(server: &str, tool: &str) -> String {
     let clean = |text: &str| -> String {
-        text.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' }).collect()
+        text.chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect()
     };
     let mut name = format!("mcp__{}__{}", clean(server), clean(tool));
     name.truncate(64);
@@ -276,13 +311,20 @@ pub struct McpHub {
 
 impl McpHub {
     pub fn new(configs: &BTreeMap<String, McpServerConfig>) -> Self {
-        McpHub { configs: configs.clone(), started: tokio::sync::OnceCell::new() }
+        McpHub {
+            configs: configs.clone(),
+            started: tokio::sync::OnceCell::new(),
+        }
     }
 
     async fn started(&self) -> &Started {
         self.started
             .get_or_init(|| async {
-                let mut started = Started { tools: Vec::new(), status: Vec::new(), clients: Vec::new() };
+                let mut started = Started {
+                    tools: Vec::new(),
+                    status: Vec::new(),
+                    clients: Vec::new(),
+                };
                 for (name, config) in &self.configs {
                     if config.disabled {
                         continue;
@@ -308,12 +350,22 @@ impl McpHub {
                                     read_only: tool["annotations"]["readOnlyHint"] == true,
                                 }));
                             }
-                            started.status.push(McpServerStatus { name: name.clone(), running: true, tools: tools.len(), error: None });
+                            started.status.push(McpServerStatus {
+                                name: name.clone(),
+                                running: true,
+                                tools: tools.len(),
+                                error: None,
+                            });
                             started.clients.push(client);
                         }
                         Ok(Err(error)) => {
                             tracing::warn!(server = %name, "MCP server failed to start: {error}");
-                            started.status.push(McpServerStatus { name: name.clone(), running: false, tools: 0, error: Some(error) });
+                            started.status.push(McpServerStatus {
+                                name: name.clone(),
+                                running: false,
+                                tools: 0,
+                                error: Some(error),
+                            });
                         }
                         Err(_) => {
                             tracing::warn!(server = %name, "MCP server did not finish starting in time");
@@ -376,7 +428,11 @@ done
         let mut configs = BTreeMap::new();
         configs.insert(
             "fake server".to_string(),
-            McpServerConfig { command: command.into(), args: args.iter().map(|s| s.to_string()).collect(), ..Default::default() },
+            McpServerConfig {
+                command: command.into(),
+                args: args.iter().map(|s| s.to_string()).collect(),
+                ..Default::default()
+            },
         );
         McpHub::new(&configs)
     }
@@ -399,7 +455,15 @@ done
         assert!(failed.is_error);
         assert_eq!(failed.content, "boom");
 
-        assert_eq!(hub.status().await, vec![McpServerStatus { name: "fake server".into(), running: true, tools: 2, error: None }]);
+        assert_eq!(
+            hub.status().await,
+            vec![McpServerStatus {
+                name: "fake server".into(),
+                running: true,
+                tools: 2,
+                error: None
+            }]
+        );
         hub.shutdown();
     }
 

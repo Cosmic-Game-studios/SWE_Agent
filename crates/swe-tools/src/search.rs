@@ -37,7 +37,11 @@ fn walker(root: &Path) -> ignore::Walk {
 /// which is what `*.rs` means to most people.
 fn compile_glob(pattern: &str) -> Result<GlobMatcher, String> {
     let pattern = pattern.trim_start_matches("./");
-    let full = if pattern.contains('/') { pattern.to_string() } else { format!("**/{pattern}") };
+    let full = if pattern.contains('/') {
+        pattern.to_string()
+    } else {
+        format!("**/{pattern}")
+    };
     GlobBuilder::new(&full)
         .literal_separator(true)
         .build()
@@ -89,7 +93,11 @@ impl Tool for Glob {
 
     fn paths(&self, input: &Value) -> Vec<String> {
         let path = arg_str(input, "path");
-        vec![if path.is_empty() { ".".to_string() } else { path.to_string() }]
+        vec![if path.is_empty() {
+            ".".to_string()
+        } else {
+            path.to_string()
+        }]
     }
 
     async fn run(&self, input: Value, ctx: &ToolContext) -> ToolOutput {
@@ -114,7 +122,11 @@ impl Tool for Glob {
                 }
                 let relative = entry.path().strip_prefix(&root).unwrap_or(entry.path());
                 if matcher.is_match(relative) {
-                    let modified = entry.metadata().ok().and_then(|m| m.modified().ok()).unwrap_or(SystemTime::UNIX_EPOCH);
+                    let modified = entry
+                        .metadata()
+                        .ok()
+                        .and_then(|m| m.modified().ok())
+                        .unwrap_or(SystemTime::UNIX_EPOCH);
                     hits.push((modified, entry.into_path()));
                 }
             }
@@ -213,7 +225,11 @@ impl Tool for Grep {
 
     fn paths(&self, input: &Value) -> Vec<String> {
         let path = arg_str(input, "path");
-        vec![if path.is_empty() { ".".to_string() } else { path.to_string() }]
+        vec![if path.is_empty() {
+            ".".to_string()
+        } else {
+            path.to_string()
+        }]
     }
 
     async fn run(&self, input: Value, ctx: &ToolContext) -> ToolOutput {
@@ -221,7 +237,10 @@ impl Tool for Grep {
             Ok(args) => args,
             Err(output) => return output,
         };
-        let regex = match RegexBuilder::new(&args.pattern).case_insensitive(args.ignore_case).build() {
+        let regex = match RegexBuilder::new(&args.pattern)
+            .case_insensitive(args.ignore_case)
+            .build()
+        {
             Ok(regex) => regex,
             Err(err) => return ToolOutput::error(format!("Invalid regular expression: {err}")),
         };
@@ -233,7 +252,10 @@ impl Tool for Grep {
             Ok(matcher) => matcher,
             Err(message) => return ToolOutput::error(message),
         };
-        let limit = args.max_results.unwrap_or(DEFAULT_GREP_RESULTS).clamp(1, MAX_GREP_RESULTS);
+        let limit = args
+            .max_results
+            .unwrap_or(DEFAULT_GREP_RESULTS)
+            .clamp(1, MAX_GREP_RESULTS);
         let context = args.context.unwrap_or(0).min(10);
         let files_only = args.files_only;
         let cwd = ctx.cwd.clone();
@@ -290,7 +312,11 @@ impl Tool for Grep {
                         if last_printed.is_some_and(|last| number <= last) {
                             continue;
                         }
-                        let separator = if number == index || regex.is_match(context_line) { ':' } else { '-' };
+                        let separator = if number == index || regex.is_match(context_line) {
+                            ':'
+                        } else {
+                            '-'
+                        };
                         out.push(format!(
                             "{shown}{separator}{}{separator}{}",
                             number + 1,
@@ -335,7 +361,11 @@ mod tests {
         fs::write(root.join(".gitignore"), "target/\n").unwrap();
         fs::write(root.join("Cargo.toml"), "[package]\nname = \"demo\"\n").unwrap();
         fs::write(root.join("src/main.rs"), "fn main() {\n    helper();\n}\n").unwrap();
-        fs::write(root.join("src/util/helper.rs"), "pub fn helper() {}\n// TODO: Helper docs\n").unwrap();
+        fs::write(
+            root.join("src/util/helper.rs"),
+            "pub fn helper() {}\n// TODO: Helper docs\n",
+        )
+        .unwrap();
         fs::write(root.join("target/debug/build.rs"), "fn helper() {}\n").unwrap();
         fs::write(root.join(".git/config"), "helper\n").unwrap();
         fs::write(root.join("blob.bin"), [b'h', 0, b'e', b'l', b'p', b'e', b'r']).unwrap();
@@ -378,7 +408,12 @@ mod tests {
             ["src/main.rs:2:    helper();", "src/util/helper.rs:1:pub fn helper() {}"]
         );
 
-        let insensitive = Grep.run(json!({"pattern": "helper", "ignore_case": true, "glob": "*.rs", "path": "src/util"}), &ctx).await;
+        let insensitive = Grep
+            .run(
+                json!({"pattern": "helper", "ignore_case": true, "glob": "*.rs", "path": "src/util"}),
+                &ctx,
+            )
+            .await;
         assert_eq!(insensitive.content.lines().count(), 2);
 
         let files = Grep.run(json!({"pattern": "helper", "files_only": true}), &ctx).await;
@@ -403,7 +438,11 @@ mod tests {
         );
 
         let limited = Grep.run(json!({"pattern": "line", "max_results": 3}), &ctx).await;
-        assert!(limited.content.starts_with("a.txt:1:line 1\na.txt:2:line 2\na.txt:3:line 3\n"));
+        assert!(
+            limited
+                .content
+                .starts_with("a.txt:1:line 1\na.txt:2:line 2\na.txt:3:line 3\n")
+        );
         assert!(limited.content.contains("Stopped after 3 matches"));
     }
 }

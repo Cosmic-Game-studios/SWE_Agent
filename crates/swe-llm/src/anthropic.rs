@@ -224,7 +224,9 @@ impl Provider for Anthropic {
                 }
             }
         }
-        Err(LlmError::Protocol("request kept being rejected after downgrades".into()))
+        Err(LlmError::Protocol(
+            "request kept being rejected after downgrades".into(),
+        ))
     }
 
     async fn list_models(&self) -> Result<Vec<ModelInfo>, LlmError> {
@@ -268,7 +270,12 @@ fn convert_messages(messages: &[Message]) -> Vec<Value> {
         // `tool_result` blocks have to lead a user message.
         if message.role == Role::User {
             for block in &message.content {
-                if let ContentBlock::ToolResult { tool_call_id, content, is_error } = block {
+                if let ContentBlock::ToolResult {
+                    tool_call_id,
+                    content,
+                    is_error,
+                } = block
+                {
                     let mut result = json!({
                         "type": "tool_result",
                         "tool_use_id": http::sanitize_tool_id(tool_call_id),
@@ -326,12 +333,12 @@ fn convert_messages(messages: &[Message]) -> Vec<Value> {
     }
 
     // Cache breakpoint on the newest block so the next request reads this prefix.
-    if let Some((_, blocks)) = out.last_mut() {
-        if let Some(last) = blocks.last_mut() {
-            let cacheable = matches!(last["type"].as_str(), Some("text" | "tool_result" | "image"));
-            if cacheable {
-                last["cache_control"] = json!({"type": "ephemeral"});
-            }
+    if let Some((_, blocks)) = out.last_mut()
+        && let Some(last) = blocks.last_mut()
+    {
+        let cacheable = matches!(last["type"].as_str(), Some("text" | "tool_result" | "image"));
+        if cacheable {
+            last["cache_control"] = json!({"type": "ephemeral"});
         }
     }
 
@@ -394,11 +401,16 @@ async fn read_stream(mut sse: SseReader, emitter: Emitter, requested_model: Stri
                 if let Some(text) = block["text"].as_str() {
                     emitter.text(text).await?;
                 }
-                blocks[index] = Some(PendingBlock { block, partial_json: String::new() });
+                blocks[index] = Some(PendingBlock {
+                    block,
+                    partial_json: String::new(),
+                });
             }
             "content_block_delta" => {
                 let index = data["index"].as_u64().unwrap_or(0) as usize;
-                let Some(Some(pending)) = blocks.get_mut(index) else { continue };
+                let Some(Some(pending)) = blocks.get_mut(index) else {
+                    continue;
+                };
                 let delta = &data["delta"];
                 match delta["type"].as_str().unwrap_or_default() {
                     "text_delta" => {
@@ -420,7 +432,10 @@ async fn read_stream(mut sse: SseReader, emitter: Emitter, requested_model: Stri
                         pending.partial_json.push_str(fragment);
                         if !fragment.is_empty() {
                             emitter
-                                .emit(StreamEvent::ToolCallDelta { index, fragment: fragment.to_string() })
+                                .emit(StreamEvent::ToolCallDelta {
+                                    index,
+                                    fragment: fragment.to_string(),
+                                })
                                 .await?;
                         }
                     }
@@ -455,7 +470,10 @@ async fn read_stream(mut sse: SseReader, emitter: Emitter, requested_model: Stri
                 let error = &data["error"];
                 let kind = error["type"].as_str().unwrap_or("error");
                 let message = error["message"].as_str().unwrap_or("unknown stream error");
-                let retryable = matches!(kind, "overloaded_error" | "api_error" | "rate_limit_error" | "timeout_error");
+                let retryable = matches!(
+                    kind,
+                    "overloaded_error" | "api_error" | "rate_limit_error" | "timeout_error"
+                );
                 return Err(ReadError::Failed(if retryable {
                     LlmError::Stream(format!("{kind}: {message}"))
                 } else {
@@ -473,14 +491,19 @@ async fn read_stream(mut sse: SseReader, emitter: Emitter, requested_model: Stri
     }
 
     let mut content = assemble(blocks, &model);
-    if stop_reason == StopReason::Refusal {
-        if let Some(detail) = refusal_detail {
-            content.push(ContentBlock::text(format!("[The model declined to continue: {detail}]")));
-        }
+    if stop_reason == StopReason::Refusal
+        && let Some(detail) = refusal_detail
+    {
+        content.push(ContentBlock::text(format!(
+            "[The model declined to continue: {detail}]"
+        )));
     }
     emitter
         .emit(StreamEvent::Completed(Completion {
-            message: Message { role: Role::Assistant, content },
+            message: Message {
+                role: Role::Assistant,
+                content,
+            },
             usage,
             stop_reason,
             model: Some(model),
@@ -516,7 +539,11 @@ fn apply_usage(raw: &Value, usage: &mut Usage, uncached_input: &mut u64) {
 }
 
 fn assemble(blocks: Vec<Option<PendingBlock>>, model: &str) -> Vec<ContentBlock> {
-    let meta = |raw: Value| ProviderMeta { protocol: PROTOCOL.to_string(), model: model.to_string(), raw };
+    let meta = |raw: Value| ProviderMeta {
+        protocol: PROTOCOL.to_string(),
+        model: model.to_string(),
+        raw,
+    };
     let blocks: Vec<PendingBlock> = blocks.into_iter().flatten().collect();
 
     // After a server-side refusal fallback, reasoning and tool calls produced
@@ -614,7 +641,10 @@ mod tests {
         assert!(body.get("temperature").is_none());
         assert_eq!(body["system"][0]["cache_control"], json!({"type": "ephemeral"}));
         assert_eq!(body["tools"][0]["eager_input_streaming"], true);
-        assert_eq!(body["messages"][0]["content"][0]["cache_control"], json!({"type": "ephemeral"}));
+        assert_eq!(
+            body["messages"][0]["content"][0]["cache_control"],
+            json!({"type": "ephemeral"})
+        );
     }
 
     #[test]
@@ -696,7 +726,10 @@ mod tests {
     fn merges_consecutive_roles_and_skips_empty_messages() {
         let history = vec![
             Message::user_text("one"),
-            Message { role: Role::Assistant, content: vec![ContentBlock::text("  ")] },
+            Message {
+                role: Role::Assistant,
+                content: vec![ContentBlock::text("  ")],
+            },
             Message::user_text("two"),
         ];
         let converted = convert_messages(&history);
@@ -706,7 +739,12 @@ mod tests {
 
     #[test]
     fn fallback_boundary_drops_declined_reasoning_and_tool_calls() {
-        let pending = |block: Value| Some(PendingBlock { block, partial_json: String::new() });
+        let pending = |block: Value| {
+            Some(PendingBlock {
+                block,
+                partial_json: String::new(),
+            })
+        };
         let content = assemble(
             vec![
                 pending(json!({"type": "thinking", "thinking": "a", "signature": "s1"})),

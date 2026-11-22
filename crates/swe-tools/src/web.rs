@@ -86,7 +86,10 @@ impl Tool for WebFetch {
         }
         let max_chars = args.max_chars.unwrap_or(DEFAULT_MAX_CHARS).clamp(1_000, HARD_MAX_CHARS);
 
-        let request = self.client.get(&args.url).header("accept", "text/html,text/plain,application/json,*/*;q=0.8");
+        let request = self
+            .client
+            .get(&args.url)
+            .header("accept", "text/html,text/plain,application/json,*/*;q=0.8");
         let response = tokio::select! {
             response = request.send() => response,
             _ = ctx.cancel.cancelled() => return ToolOutput::error("[stopped by the user]"),
@@ -104,7 +107,9 @@ impl Tool for WebFetch {
             .to_ascii_lowercase();
         let textual = content_type.is_empty()
             || content_type.starts_with("text/")
-            || ["json", "xml", "javascript", "yaml", "toml", "x-sh"].iter().any(|kind| content_type.contains(kind));
+            || ["json", "xml", "javascript", "yaml", "toml", "x-sh"]
+                .iter()
+                .any(|kind| content_type.contains(kind));
         if !textual {
             return ToolOutput::error(format!(
                 "{} returned `{content_type}`, which is not text. Download it with bash if you need the file.",
@@ -135,7 +140,11 @@ impl Tool for WebFetch {
         let raw = String::from_utf8_lossy(&body);
         let looks_like_html = content_type.contains("html")
             || (content_type.is_empty() && raw.trim_start().to_ascii_lowercase().starts_with("<!doctype html"));
-        let text = if looks_like_html { html_to_text(&raw) } else { raw.into_owned() };
+        let text = if looks_like_html {
+            html_to_text(&raw)
+        } else {
+            raw.into_owned()
+        };
 
         let mut out = truncate_middle(text.trim(), max_chars);
         if clipped {
@@ -174,7 +183,9 @@ mod tests {
         let address = listener.local_addr().unwrap();
         tokio::spawn(async move {
             loop {
-                let Ok((mut socket, _)) = listener.accept().await else { break };
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    break;
+                };
                 let mut buffer = [0u8; 2048];
                 let _ = socket.read(&mut buffer).await;
                 let _ = socket.write_all(response.as_bytes()).await;
@@ -195,7 +206,8 @@ mod tests {
         assert!(!page.is_error, "{}", page.content);
         assert_eq!(page.content, "Title\n\nHello world");
 
-        let url = serve("HTTP/1.1 404 Not Found\r\ncontent-type: text/plain\r\nconnection: close\r\n\r\nnothing here").await;
+        let url =
+            serve("HTTP/1.1 404 Not Found\r\ncontent-type: text/plain\r\nconnection: close\r\n\r\nnothing here").await;
         let missing = tool.run(json!({"url": url}), &ctx).await;
         assert!(missing.is_error);
         assert!(missing.content.contains("HTTP 404"));

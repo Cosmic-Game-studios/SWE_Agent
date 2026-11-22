@@ -9,15 +9,30 @@ use std::path::Path;
 
 /// Root-agent profiles a session can be created with.
 pub const ROOT_PROFILES: &[(&str, &str)] = &[
-    ("coder", "Works on the task directly; may delegate side work to sub-agents."),
-    ("orchestrator", "Plans, splits the work across parallel sub-agents, integrates and verifies."),
+    (
+        "coder",
+        "Works on the task directly; may delegate side work to sub-agents.",
+    ),
+    (
+        "orchestrator",
+        "Plans, splits the work across parallel sub-agents, integrates and verifies.",
+    ),
 ];
 
 /// Sub-agent types the `task` tool can start.
 pub const SUBAGENT_TYPES: &[(&str, &str)] = &[
-    ("general", "Full tool access. Implements a self-contained piece of work."),
-    ("explore", "Read-only. Searches and reads code to answer a question about the codebase."),
-    ("review", "Read-only plus shell. Reviews changes and runs checks, reports problems."),
+    (
+        "general",
+        "Full tool access. Implements a self-contained piece of work.",
+    ),
+    (
+        "explore",
+        "Read-only. Searches and reads code to answer a question about the codebase.",
+    ),
+    (
+        "review",
+        "Read-only plus shell. Reviews changes and runs checks, reports problems.",
+    ),
 ];
 
 const MAX_PROJECT_INSTRUCTIONS: usize = 24_000;

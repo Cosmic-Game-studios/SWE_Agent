@@ -76,7 +76,10 @@ struct ApiError {
 
 impl ApiError {
     fn new(status: StatusCode, message: impl Into<String>) -> Self {
-        ApiError { status, message: message.into() }
+        ApiError {
+            status,
+            message: message.into(),
+        }
     }
 
     fn bad_request(message: impl Into<String>) -> Self {
@@ -119,7 +122,10 @@ pub fn router(manager: SessionManager, options: &ServeOptions) -> Router {
     let state = AppState {
         manager,
         token: options.token.as_deref().map(Arc::from),
-        dev_origin: options.dev_origin.as_deref().map(|origin| Arc::from(origin.trim_end_matches('/'))),
+        dev_origin: options
+            .dev_origin
+            .as_deref()
+            .map(|origin| Arc::from(origin.trim_end_matches('/'))),
     };
     let api = Router::new()
         .route("/health", get(health))
@@ -132,7 +138,10 @@ pub fn router(manager: SessionManager, options: &ServeOptions) -> Router {
         .route("/fs/list", get(workspace::list_directories))
         .route("/events", get(global_events))
         .route("/sessions", get(list_sessions).post(create_session))
-        .route("/sessions/{id}", get(get_session).patch(update_session).delete(delete_session))
+        .route(
+            "/sessions/{id}",
+            get(get_session).patch(update_session).delete(delete_session),
+        )
         .route("/sessions/{id}/messages", post(send_message))
         .route("/sessions/{id}/cancel", post(cancel_session))
         .route("/sessions/{id}/approvals/{request_id}", post(resolve_approval))
@@ -161,8 +170,20 @@ pub async fn serve(manager: SessionManager, options: ServeOptions) -> anyhow::Re
         .await
         .map_err(|err| anyhow::anyhow!("cannot listen on {address}: {err}"))?;
     let local = listener.local_addr()?;
-    let shown_host = if options.host.is_unspecified() { "localhost".to_string() } else { local.ip().to_string() };
-    let mut url = format!("http://{}:{}/", if local.ip().is_ipv6() { format!("[{shown_host}]") } else { shown_host }, local.port());
+    let shown_host = if options.host.is_unspecified() {
+        "localhost".to_string()
+    } else {
+        local.ip().to_string()
+    };
+    let mut url = format!(
+        "http://{}:{}/",
+        if local.ip().is_ipv6() {
+            format!("[{shown_host}]")
+        } else {
+            shown_host
+        },
+        local.port()
+    );
     if let Some(token) = &options.token {
         url.push_str(&format!("?token={token}"));
     }
@@ -206,7 +227,10 @@ fn host_name(host: &str) -> &str {
 }
 
 fn is_loopback_host(host: &str) -> bool {
-    matches!(host_name(host).to_ascii_lowercase().as_str(), "localhost" | "127.0.0.1" | "[::1]")
+    matches!(
+        host_name(host).to_ascii_lowercase().as_str(),
+        "localhost" | "127.0.0.1" | "[::1]"
+    )
 }
 
 fn constant_time_eq(a: &str, b: &str) -> bool {
@@ -215,7 +239,11 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
 
 async fn guard(State(state): State<AppState>, request: Request, next: Next) -> Response {
     let headers = request.headers();
-    let host = headers.get(header::HOST).and_then(|v| v.to_str().ok()).unwrap_or_default().to_string();
+    let host = headers
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
 
     // Without a token the server is loopback-only, so any other Host means a
     // page tricked the browser into resolving its own name to 127.0.0.1.
@@ -231,20 +259,21 @@ async fn guard(State(state): State<AppState>, request: Request, next: Next) -> R
             return ApiError::new(StatusCode::FORBIDDEN, "cross-origin requests are not allowed").into_response();
         }
     }
-    if let Some(expected) = state.token.as_deref() {
-        if request.uri().path().starts_with("/api/") {
-            let bearer = headers
-                .get(header::AUTHORIZATION)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.strip_prefix("Bearer "));
-            // EventSource cannot set headers, so the token may also come as a query parameter.
-            let query = request.uri().query().and_then(|query| {
-                query.split('&').find_map(|pair| pair.strip_prefix("token="))
-            });
-            let presented = bearer.or(query).unwrap_or_default();
-            if !constant_time_eq(presented, expected) {
-                return ApiError::new(StatusCode::UNAUTHORIZED, "missing or invalid access token").into_response();
-            }
+    if let Some(expected) = state.token.as_deref()
+        && request.uri().path().starts_with("/api/")
+    {
+        let bearer = headers
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "));
+        // EventSource cannot set headers, so the token may also come as a query parameter.
+        let query = request
+            .uri()
+            .query()
+            .and_then(|query| query.split('&').find_map(|pair| pair.strip_prefix("token=")));
+        let presented = bearer.or(query).unwrap_or_default();
+        if !constant_time_eq(presented, expected) {
+            return ApiError::new(StatusCode::UNAUTHORIZED, "missing or invalid access token").into_response();
         }
     }
     next.run(request).await
@@ -355,7 +384,10 @@ async fn create_session(
     Ok(Json(state.manager.create(request)?))
 }
 
-async fn get_session(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<swe_core::SessionSnapshot>> {
+async fn get_session(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<swe_core::SessionSnapshot>> {
     Ok(Json(state.manager.get(&id)?.snapshot()))
 }
 
@@ -402,7 +434,10 @@ async fn resolve_approval(
     if session.resolve_approval(&request_id, body.decision, body.feedback) {
         Ok(Json(json!({"ok": true})))
     } else {
-        Err(ApiError::new(StatusCode::CONFLICT, "this approval is no longer pending"))
+        Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "this approval is no longer pending",
+        ))
     }
 }
 
@@ -415,7 +450,11 @@ fn to_sse(event: &Event) -> SseEvent {
     let data = serde_json::to_string(event).unwrap_or_else(|_| "{}".to_string());
     let sse = SseEvent::default().data(data);
     // Only durable events advance the resume position.
-    if event.kind.is_transient() { sse } else { sse.id(event.seq.to_string()) }
+    if event.kind.is_transient() {
+        sse
+    } else {
+        sse.id(event.seq.to_string())
+    }
 }
 
 async fn session_events(
@@ -426,7 +465,10 @@ async fn session_events(
 ) -> ApiResult<Sse<impl Stream<Item = Result<SseEvent, Infallible>>>> {
     let session = state.manager.get(&id)?;
     // A reconnecting EventSource reports where it was via Last-Event-ID.
-    let resume = headers.get("last-event-id").and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok());
+    let resume = headers
+        .get("last-event-id")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse().ok());
     let after = resume.or(query.after).unwrap_or(0);
     let (replay, receiver) = session.subscribe(after);
     let live = BroadcastStream::new(receiver).map(|item| match item {
@@ -443,13 +485,18 @@ async fn global_events(State(state): State<AppState>) -> Sse<impl Stream<Item = 
     let stream = BroadcastStream::new(state.manager.subscribe_global()).map(|item| {
         Ok(match item {
             Ok(event) => SseEvent::default().data(serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_string())),
-            Err(BroadcastStreamRecvError::Lagged(missed)) => SseEvent::default().event("resync").data(missed.to_string()),
+            Err(BroadcastStreamRecvError::Lagged(missed)) => {
+                SseEvent::default().event("resync").data(missed.to_string())
+            }
         })
     });
     Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
 }
 
-async fn session_diff(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<workspace::WorkspaceDiff>> {
+async fn session_diff(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<workspace::WorkspaceDiff>> {
     let session = state.manager.get(&id)?;
     Ok(Json(workspace::diff(&session.workspace()).await))
 }
@@ -463,12 +510,18 @@ async fn static_file(uri: Uri) -> Response {
         // Client-side routes all resolve to the app shell.
         _ => match Ui::get("index.html") {
             Some(file) => (file, "index.html"),
-            None => return ApiError::new(StatusCode::NOT_FOUND, "the web UI is not part of this build").into_response(),
+            None => {
+                return ApiError::new(StatusCode::NOT_FOUND, "the web UI is not part of this build").into_response();
+            }
         },
     };
     let mime = mime_guess::from_path(FsPath::new(name)).first_or_octet_stream();
     // Bundled assets carry a content hash in their name; the shell must stay fresh.
-    let cache = if name.starts_with("assets/") { "public, max-age=31536000, immutable" } else { "no-cache" };
+    let cache = if name.starts_with("assets/") {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
+    };
     (
         [
             (header::CONTENT_TYPE, mime.as_ref().to_string()),
@@ -486,10 +539,23 @@ mod tests {
 
     #[test]
     fn loopback_hosts_are_recognised_with_and_without_ports() {
-        for host in ["localhost", "localhost:4477", "127.0.0.1:80", "[::1]:4477", "[::1]", "LOCALHOST:1"] {
+        for host in [
+            "localhost",
+            "localhost:4477",
+            "127.0.0.1:80",
+            "[::1]:4477",
+            "[::1]",
+            "LOCALHOST:1",
+        ] {
             assert!(is_loopback_host(host), "{host}");
         }
-        for host in ["evil.example", "evil.example:4477", "127.0.0.1.evil.example", "192.168.1.5:4477", ""] {
+        for host in [
+            "evil.example",
+            "evil.example:4477",
+            "127.0.0.1.evil.example",
+            "192.168.1.5:4477",
+            "",
+        ] {
             assert!(!is_loopback_host(host), "{host}");
         }
     }

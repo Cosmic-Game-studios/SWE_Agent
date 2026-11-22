@@ -78,7 +78,11 @@ impl ToolContext {
 /// so boundary checks cannot be defeated with `a/../../b`.
 pub fn resolve_path(base: &Path, path: &str) -> PathBuf {
     let raw = Path::new(path);
-    let joined = if raw.is_absolute() { raw.to_path_buf() } else { base.join(raw) };
+    let joined = if raw.is_absolute() {
+        raw.to_path_buf()
+    } else {
+        base.join(raw)
+    };
     let mut out = PathBuf::new();
     for component in joined.components() {
         match component {
@@ -112,11 +116,19 @@ pub struct ToolOutput {
 
 impl ToolOutput {
     pub fn ok(content: impl Into<String>) -> Self {
-        ToolOutput { content: content.into(), is_error: false, display: None }
+        ToolOutput {
+            content: content.into(),
+            is_error: false,
+            display: None,
+        }
     }
 
     pub fn error(content: impl Into<String>) -> Self {
-        ToolOutput { content: content.into(), is_error: true, display: None }
+        ToolOutput {
+            content: content.into(),
+            is_error: true,
+            display: None,
+        }
     }
 
     pub fn with_display(mut self, display: ToolDisplay) -> Self {
@@ -236,7 +248,10 @@ mod tests {
     #[test]
     fn resolve_normalises_without_touching_the_file_system() {
         let base = Path::new("/work/repo");
-        assert_eq!(resolve_path(base, "src/./main.rs"), PathBuf::from("/work/repo/src/main.rs"));
+        assert_eq!(
+            resolve_path(base, "src/./main.rs"),
+            PathBuf::from("/work/repo/src/main.rs")
+        );
         assert_eq!(resolve_path(base, "a/../../outside"), PathBuf::from("/work/outside"));
         assert_eq!(resolve_path(base, "/etc/hosts"), PathBuf::from("/etc/hosts"));
         assert_eq!(resolve_path(base, "."), PathBuf::from("/work/repo"));
@@ -257,8 +272,16 @@ mod tests {
         assert_eq!(
             names,
             [
-                "bash", "bash_output", "edit_file", "glob", "grep", "kill_process", "list_dir", "read_file",
-                "web_fetch", "write_file"
+                "bash",
+                "bash_output",
+                "edit_file",
+                "glob",
+                "grep",
+                "kill_process",
+                "list_dir",
+                "read_file",
+                "web_fetch",
+                "write_file"
             ]
         );
         for spec in registry.specs() {

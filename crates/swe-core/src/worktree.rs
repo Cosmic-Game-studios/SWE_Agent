@@ -34,12 +34,18 @@ async fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        Err(if stderr.is_empty() { format!("git {} failed", args.join(" ")) } else { stderr })
+        Err(if stderr.is_empty() {
+            format!("git {} failed", args.join(" "))
+        } else {
+            stderr
+        })
     }
 }
 
 pub(crate) async fn is_git_repo(dir: &Path) -> bool {
-    git(dir, &["rev-parse", "--is-inside-work-tree"]).await.is_ok_and(|out| out == "true")
+    git(dir, &["rev-parse", "--is-inside-work-tree"])
+        .await
+        .is_ok_and(|out| out == "true")
 }
 
 /// Create `<base>/<agent_id>` as a worktree of the repository containing
@@ -56,24 +62,44 @@ pub(crate) async fn create(workspace: &Path, base: &Path, agent_id: &str) -> Res
     let branch = format!("swe/{agent_id}");
     let path_text = path.to_string_lossy().into_owned();
     git(workspace, &["worktree", "add", "-b", &branch, &path_text, "HEAD"]).await?;
-    let repo = git(workspace, &["rev-parse", "--show-toplevel"]).await.map(PathBuf::from).unwrap_or_else(|_| workspace.to_path_buf());
-    Ok(Worktree { repo, path, branch, base: head })
+    let repo = git(workspace, &["rev-parse", "--show-toplevel"])
+        .await
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| workspace.to_path_buf());
+    Ok(Worktree {
+        repo,
+        path,
+        branch,
+        base: head,
+    })
 }
 
 /// Commit whatever the agent left uncommitted, remove the checkout and say
 /// where the work is. The text is appended to the agent's report.
 pub(crate) async fn finish(tree: Worktree, description: &str) -> String {
     let mut notes = Vec::new();
-    if git(&tree.path, &["add", "-A"]).await.is_ok() && git(&tree.path, &["diff", "--cached", "--quiet"]).await.is_err() {
+    if git(&tree.path, &["add", "-A"]).await.is_ok() && git(&tree.path, &["diff", "--cached", "--quiet"]).await.is_err()
+    {
         let message = format!("{description}\n\nCommitted automatically from a sub-agent worktree.");
         // Fall back to a neutral identity only when the user has none configured.
-        let has_identity = git(&tree.path, &["config", "user.email"]).await.is_ok_and(|email| !email.is_empty());
+        let has_identity = git(&tree.path, &["config", "user.email"])
+            .await
+            .is_ok_and(|email| !email.is_empty());
         let result = if has_identity {
             git(&tree.path, &["commit", "-q", "-m", &message]).await
         } else {
             git(
                 &tree.path,
-                &["-c", "user.name=SWE Agent", "-c", "user.email=swe-agent@localhost", "commit", "-q", "-m", &message],
+                &[
+                    "-c",
+                    "user.name=SWE Agent",
+                    "-c",
+                    "user.email=swe-agent@localhost",
+                    "commit",
+                    "-q",
+                    "-m",
+                    &message,
+                ],
             )
             .await
         };
@@ -82,14 +108,21 @@ pub(crate) async fn finish(tree: Worktree, description: &str) -> String {
         }
     }
     let range = format!("{}..HEAD", tree.base);
-    let ahead: u32 = git(&tree.path, &["rev-list", "--count", &range]).await.ok().and_then(|n| n.parse().ok()).unwrap_or(0);
+    let ahead: u32 = git(&tree.path, &["rev-list", "--count", &range])
+        .await
+        .ok()
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(0);
     let path_text = tree.path.to_string_lossy().into_owned();
     if let Err(err) = git(&tree.repo, &["worktree", "remove", "--force", &path_text]).await {
         notes.push(format!("Removing the worktree at {path_text} failed: {err}"));
     }
     if ahead == 0 {
         let _ = git(&tree.repo, &["branch", "-D", &tree.branch]).await;
-        notes.insert(0, "Worktree: the agent made no changes; its branch was deleted.".to_string());
+        notes.insert(
+            0,
+            "Worktree: the agent made no changes; its branch was deleted.".to_string(),
+        );
     } else {
         notes.insert(
             0,
@@ -150,7 +183,10 @@ mod tests {
         let note = finish(tree, "Add b").await;
         assert!(note.contains("branch `swe/a1` (1 commit"), "{note}");
         assert!(!path.exists(), "the checkout is removed");
-        assert!(!repo.path().join("b.txt").exists(), "the workspace is untouched until merged");
+        assert!(
+            !repo.path().join("b.txt").exists(),
+            "the workspace is untouched until merged"
+        );
 
         git(repo.path(), &["merge", "-q", "swe/a1"]).await.unwrap();
         assert_eq!(std::fs::read_to_string(repo.path().join("b.txt")).unwrap(), "new\n");
@@ -175,6 +211,10 @@ mod tests {
         if is_git_repo(dir.path()).await {
             return;
         }
-        assert!(create(dir.path(), base.path(), "a3").await.is_err_and(|err| err.contains("not a git repository")));
+        assert!(
+            create(dir.path(), base.path(), "a3")
+                .await
+                .is_err_and(|err| err.contains("not a git repository"))
+        );
     }
 }

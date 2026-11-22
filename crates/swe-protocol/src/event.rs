@@ -88,7 +88,9 @@ impl std::str::FromStr for Engine {
             "native" => Ok(Engine::Native),
             "claude-cli" | "claude" => Ok(Engine::ClaudeCli),
             "codex-cli" | "codex" => Ok(Engine::CodexCli),
-            other => Err(format!("unknown engine `{other}` (expected native|claude-cli|codex-cli)")),
+            other => Err(format!(
+                "unknown engine `{other}` (expected native|claude-cli|codex-cli)"
+            )),
         }
     }
 }
@@ -232,9 +234,13 @@ pub enum EventKind {
         model: String,
     },
     /// Streaming assistant text. Transient.
-    AssistantDelta { text: String },
+    AssistantDelta {
+        text: String,
+    },
     /// Streaming reasoning text. Transient.
-    ReasoningDelta { text: String },
+    ReasoningDelta {
+        text: String,
+    },
     /// A tool call is being generated; `input_chars` grows as arguments stream. Transient.
     ToolCallStreaming {
         tool_call_id: String,
@@ -256,7 +262,10 @@ pub enum EventKind {
         summary: String,
     },
     /// Live output of a running tool. Transient.
-    ToolOutputDelta { tool_call_id: String, chunk: String },
+    ToolOutputDelta {
+        tool_call_id: String,
+        chunk: String,
+    },
     ToolFinished {
         tool_call_id: String,
         name: String,
@@ -283,7 +292,9 @@ pub enum EventKind {
         request_id: String,
         decision: ApprovalDecision,
     },
-    TodosUpdated { todos: Vec<Todo> },
+    TodosUpdated {
+        todos: Vec<Todo>,
+    },
     /// A sub-agent was started by the tool call `tool_call_id` of `parent_agent_id`.
     AgentSpawned {
         parent_agent_id: String,
@@ -311,9 +322,13 @@ pub enum EventKind {
         delay_ms: u64,
         message: String,
     },
-    Error { message: String },
+    Error {
+        message: String,
+    },
     /// Informational line for the timeline (mode switches, fallbacks, ...).
-    Notice { text: String },
+    Notice {
+        text: String,
+    },
     TurnFinished {
         outcome: TurnOutcome,
         /// Usage of this turn, sub-agents included.
@@ -381,7 +396,10 @@ mod tests {
         assert_eq!(value["seq"], 7);
         assert_eq!(value["type"], "tool_finished");
         assert_eq!(value["agent_id"], "root");
-        assert_eq!(value["display"], json!({"kind": "command", "command": "ls", "exit_code": 0}));
+        assert_eq!(
+            value["display"],
+            json!({"kind": "command", "command": "ls", "exit_code": 0})
+        );
         let back: Event = serde_json::from_value(value).unwrap();
         assert_eq!(back, event);
     }

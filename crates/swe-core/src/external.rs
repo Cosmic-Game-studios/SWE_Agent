@@ -58,7 +58,10 @@ fn binary_for(engine: Engine) -> String {
         Engine::CodexCli => ("SWE_AGENT_CODEX_BIN", "codex"),
         Engine::Native => return String::new(),
     };
-    std::env::var(variable).ok().filter(|value| !value.trim().is_empty()).unwrap_or_else(|| default.to_string())
+    std::env::var(variable)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| default.to_string())
 }
 
 fn find_on_path(binary: &str) -> Option<PathBuf> {
@@ -68,8 +71,15 @@ fn find_on_path(binary: &str) -> Option<PathBuf> {
     }
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path).find_map(|dir| {
-        let extensions: &[&str] = if cfg!(windows) { &["", ".exe", ".cmd", ".bat"] } else { &[""] };
-        extensions.iter().map(|ext| dir.join(format!("{binary}{ext}"))).find(|file| file.is_file())
+        let extensions: &[&str] = if cfg!(windows) {
+            &["", ".exe", ".cmd", ".bat"]
+        } else {
+            &[""]
+        };
+        extensions
+            .iter()
+            .map(|ext| dir.join(format!("{binary}{ext}")))
+            .find(|file| file.is_file())
     })
 }
 
@@ -117,7 +127,10 @@ pub fn engines() -> Vec<EngineInfo> {
 /// What a line of CLI output means for the session.
 #[derive(Debug, PartialEq)]
 enum Out {
-    Event { agent_id: String, kind: EventKind },
+    Event {
+        agent_id: String,
+        kind: EventKind,
+    },
     /// The CLI's own conversation id.
     SessionId(String),
     /// Usage to add to the session.
@@ -129,7 +142,10 @@ enum Out {
 }
 
 fn event(agent_id: &str, kind: EventKind) -> Out {
-    Out::Event { agent_id: agent_id.to_string(), kind }
+    Out::Event {
+        agent_id: agent_id.to_string(),
+        kind,
+    }
 }
 
 trait LineParser: Send {
@@ -146,7 +162,13 @@ struct OpenTool {
 
 fn claude_command(binary: &str, meta: &SessionMeta) -> Command {
     let mut command = Command::new(binary);
-    command.args(["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"]);
+    command.args([
+        "-p",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+    ]);
     command.args([
         "--permission-mode",
         match meta.mode {
@@ -179,8 +201,20 @@ fn claude_tool_kind(name: &str) -> ToolKind {
 
 /// One line describing a tool call, from whichever argument identifies it.
 fn summarize_input(input: &Value) -> String {
-    const KEYS: &[&str] = &["command", "file_path", "path", "pattern", "url", "query", "description", "prompt"];
-    let text = KEYS.iter().find_map(|key| input.get(*key).and_then(Value::as_str)).unwrap_or_default();
+    const KEYS: &[&str] = &[
+        "command",
+        "file_path",
+        "path",
+        "pattern",
+        "url",
+        "query",
+        "description",
+        "prompt",
+    ];
+    let text = KEYS
+        .iter()
+        .find_map(|key| input.get(*key).and_then(Value::as_str))
+        .unwrap_or_default();
     swe_tools::text::truncate_line(text.lines().next().unwrap_or_default(), 200)
 }
 
@@ -196,7 +230,10 @@ fn todos_from(input: &Value) -> Option<Vec<Todo>> {
                     "in_progress" => TodoStatus::InProgress,
                     _ => TodoStatus::Pending,
                 };
-                Some(Todo { content: content.to_string(), status })
+                Some(Todo {
+                    content: content.to_string(),
+                    status,
+                })
             })
             .collect(),
     )
@@ -225,34 +262,36 @@ impl LineParser for ClaudeParser {
         let mut out = Vec::new();
         let agent = self.agent_for(line);
         match line["type"].as_str().unwrap_or_default() {
-            "system" => match line["subtype"].as_str().unwrap_or_default() {
-                "init" => {
-                    if let Some(id) = line["session_id"].as_str() {
-                        out.push(Out::SessionId(id.to_string()));
-                    }
-                    // An exported API key silently takes precedence over a
-                    // subscription login; the user should know which is billed.
-                    let source = line["apiKeySource"].as_str().unwrap_or("none");
-                    if source != "none" && !self.announced_key {
-                        self.announced_key = true;
-                        out.push(event(
+            "system" => {
+                match line["subtype"].as_str().unwrap_or_default() {
+                    "init" => {
+                        if let Some(id) = line["session_id"].as_str() {
+                            out.push(Out::SessionId(id.to_string()));
+                        }
+                        // An exported API key silently takes precedence over a
+                        // subscription login; the user should know which is billed.
+                        let source = line["apiKeySource"].as_str().unwrap_or("none");
+                        if source != "none" && !self.announced_key {
+                            self.announced_key = true;
+                            out.push(event(
                             ROOT_AGENT,
                             EventKind::Notice {
                                 text: format!("claude is authenticating with an API key ({source}), not with an account login."),
                             },
                         ));
+                        }
                     }
+                    "api_retry" => out.push(event(
+                        &agent,
+                        EventKind::Retrying {
+                            attempt: line["attempt"].as_u64().unwrap_or(1) as u32,
+                            delay_ms: line["retry_delay_ms"].as_u64().unwrap_or(0),
+                            message: line["error"].as_str().unwrap_or("request failed").to_string(),
+                        },
+                    )),
+                    _ => {}
                 }
-                "api_retry" => out.push(event(
-                    &agent,
-                    EventKind::Retrying {
-                        attempt: line["attempt"].as_u64().unwrap_or(1) as u32,
-                        delay_ms: line["retry_delay_ms"].as_u64().unwrap_or(0),
-                        message: line["error"].as_str().unwrap_or("request failed").to_string(),
-                    },
-                )),
-                _ => {}
-            },
+            }
             "stream_event" => {
                 let delta = &line["event"]["delta"];
                 if line["event"]["type"] == "content_block_delta" {
@@ -277,7 +316,10 @@ impl LineParser for ClaudeParser {
                         "thinking" => {
                             let text = block["thinking"].as_str().unwrap_or_default();
                             if !text.is_empty() {
-                                content.push(ContentBlock::Reasoning { text: text.to_string(), meta: None });
+                                content.push(ContentBlock::Reasoning {
+                                    text: text.to_string(),
+                                    meta: None,
+                                });
                             }
                         }
                         "tool_use" => {
@@ -300,7 +342,10 @@ impl LineParser for ClaudeParser {
                     out.push(event(
                         &agent,
                         EventKind::AssistantMessage {
-                            message: Message { role: Role::Assistant, content },
+                            message: Message {
+                                role: Role::Assistant,
+                                content,
+                            },
                             // Per-message usage repeats across split events;
                             // the final `result` carries the real totals.
                             usage: Usage::default(),
@@ -343,7 +388,14 @@ impl LineParser for ClaudeParser {
                     if let Some(todos) = todos_from(&input).filter(|_| name == "TodoWrite") {
                         out.push(event(ROOT_AGENT, EventKind::TodosUpdated { todos }));
                     }
-                    self.tools.insert(id, OpenTool { name, input, started: Instant::now() });
+                    self.tools.insert(
+                        id,
+                        OpenTool {
+                            name,
+                            input,
+                            started: Instant::now(),
+                        },
+                    );
                 }
             }
             "user" => {
@@ -355,7 +407,11 @@ impl LineParser for ClaudeParser {
                     let Some(tool) = self.tools.remove(id) else { continue };
                     let output = match &block["content"] {
                         Value::String(text) => text.clone(),
-                        Value::Array(parts) => parts.iter().filter_map(|part| part["text"].as_str()).collect::<Vec<_>>().join("\n"),
+                        Value::Array(parts) => parts
+                            .iter()
+                            .filter_map(|part| part["text"].as_str())
+                            .collect::<Vec<_>>()
+                            .join("\n"),
                         _ => String::new(),
                     };
                     let is_error = block["is_error"] == true;
@@ -367,12 +423,24 @@ impl LineParser for ClaudeParser {
                                 tool.input["old_string"].as_str().unwrap_or_default(),
                                 tool.input["new_string"].as_str().unwrap_or_default(),
                             );
-                            Some(ToolDisplay::Diff { path: path.to_string(), diff: diff.unified, added: diff.added, removed: diff.removed, created: false })
+                            Some(ToolDisplay::Diff {
+                                path: path.to_string(),
+                                diff: diff.unified,
+                                added: diff.added,
+                                removed: diff.removed,
+                                created: false,
+                            })
                         }
                         "Write" if !is_error => {
                             let path = tool.input["file_path"].as_str().unwrap_or_default();
                             let diff = unified_diff(path, "", tool.input["content"].as_str().unwrap_or_default());
-                            Some(ToolDisplay::Diff { path: path.to_string(), diff: diff.unified, added: diff.added, removed: 0, created: false })
+                            Some(ToolDisplay::Diff {
+                                path: path.to_string(),
+                                diff: diff.unified,
+                                added: diff.added,
+                                removed: 0,
+                                created: false,
+                            })
                         }
                         "Bash" => Some(ToolDisplay::Command {
                             command: tool.input["command"].as_str().unwrap_or_default().to_string(),
@@ -396,7 +464,11 @@ impl LineParser for ClaudeParser {
                         out.push(event(
                             &child,
                             EventKind::AgentFinished {
-                                outcome: if is_error { TurnOutcome::Error } else { TurnOutcome::Completed },
+                                outcome: if is_error {
+                                    TurnOutcome::Error
+                                } else {
+                                    TurnOutcome::Completed
+                                },
                                 usage: Usage::default(),
                             },
                         ));
@@ -407,10 +479,23 @@ impl LineParser for ClaudeParser {
                 let info = &line["rate_limit_info"];
                 match info["status"].as_str().unwrap_or_default() {
                     "allowed_warning" => {
-                        let used = info["utilization"].as_f64().map(|u| format!(" ({:.0}% used)", u * 100.0)).unwrap_or_default();
-                        out.push(event(ROOT_AGENT, EventKind::Notice { text: format!("Approaching the plan's usage limit{used}.") }));
+                        let used = info["utilization"]
+                            .as_f64()
+                            .map(|u| format!(" ({:.0}% used)", u * 100.0))
+                            .unwrap_or_default();
+                        out.push(event(
+                            ROOT_AGENT,
+                            EventKind::Notice {
+                                text: format!("Approaching the plan's usage limit{used}."),
+                            },
+                        ));
                     }
-                    "rejected" => out.push(event(ROOT_AGENT, EventKind::Notice { text: "The plan's usage limit has been reached.".into() })),
+                    "rejected" => out.push(event(
+                        ROOT_AGENT,
+                        EventKind::Notice {
+                            text: "The plan's usage limit has been reached.".into(),
+                        },
+                    )),
                     _ => {}
                 }
             }
@@ -450,7 +535,12 @@ impl LineParser for ClaudeParser {
                 }
                 let failed = line["is_error"] == true || line["subtype"].as_str().is_some_and(|s| s != "success");
                 out.push(Out::Finished(failed.then(|| {
-                    let errors: Vec<&str> = line["errors"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+                    let errors: Vec<&str> = line["errors"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .collect();
                     if !errors.is_empty() {
                         errors.join("; ")
                     } else {
@@ -507,7 +597,10 @@ struct CodexParser {
 
 impl CodexParser {
     fn new() -> Self {
-        CodexParser { run: crate::session::short_id()[..6].to_string(), tools: HashMap::new() }
+        CodexParser {
+            run: crate::session::short_id()[..6].to_string(),
+            tools: HashMap::new(),
+        }
     }
 
     fn call_id(&self, item: &Value) -> String {
@@ -521,12 +614,32 @@ impl CodexParser {
         }
         out.push(event(
             ROOT_AGENT,
-            EventKind::ToolStarted { tool_call_id: id.clone(), name: name.to_string(), kind, input: input.clone(), summary },
+            EventKind::ToolStarted {
+                tool_call_id: id.clone(),
+                name: name.to_string(),
+                kind,
+                input: input.clone(),
+                summary,
+            },
         ));
-        self.tools.insert(id, OpenTool { name: name.to_string(), input, started: Instant::now() });
+        self.tools.insert(
+            id,
+            OpenTool {
+                name: name.to_string(),
+                input,
+                started: Instant::now(),
+            },
+        );
     }
 
-    fn finish(&mut self, out: &mut Vec<Out>, item: &Value, output: String, is_error: bool, display: Option<ToolDisplay>) {
+    fn finish(
+        &mut self,
+        out: &mut Vec<Out>,
+        item: &Value,
+        output: String,
+        is_error: bool,
+        display: Option<ToolDisplay>,
+    ) {
         let id = self.call_id(item);
         let Some(tool) = self.tools.remove(&id) else { return };
         out.push(event(
@@ -567,10 +680,20 @@ impl LineParser for CodexParser {
                 out.push(Out::Finished(None));
             }
             "turn.failed" => {
-                out.push(Out::Finished(Some(line["error"]["message"].as_str().unwrap_or("the turn failed").to_string())));
+                out.push(Out::Finished(Some(
+                    line["error"]["message"]
+                        .as_str()
+                        .unwrap_or("the turn failed")
+                        .to_string(),
+                )));
             }
             "error" => {
-                out.push(Out::Finished(Some(line["message"].as_str().unwrap_or("codex reported an error").to_string())));
+                out.push(Out::Finished(Some(
+                    line["message"]
+                        .as_str()
+                        .unwrap_or("codex reported an error")
+                        .to_string(),
+                )));
             }
             "item.started" | "item.updated" | "item.completed" => match item["type"].as_str().unwrap_or_default() {
                 "agent_message" if done => {
@@ -594,7 +717,10 @@ impl LineParser for CodexParser {
                             EventKind::AssistantMessage {
                                 message: Message {
                                     role: Role::Assistant,
-                                    content: vec![ContentBlock::Reasoning { text: text.to_string(), meta: None }],
+                                    content: vec![ContentBlock::Reasoning {
+                                        text: text.to_string(),
+                                        meta: None,
+                                    }],
                                 },
                                 usage: Usage::default(),
                                 stop_reason: StopReason::EndTurn,
@@ -604,16 +730,35 @@ impl LineParser for CodexParser {
                 }
                 "command_execution" => {
                     let command = item["command"].as_str().unwrap_or_default().to_string();
-                    self.start(&mut out, item, "bash", ToolKind::Execute, json!({"command": command}), command.clone());
+                    self.start(
+                        &mut out,
+                        item,
+                        "bash",
+                        ToolKind::Execute,
+                        json!({"command": command}),
+                        command.clone(),
+                    );
                     if done {
                         let exit_code = item["exit_code"].as_i64().map(|code| code as i32);
                         let status = item["status"].as_str().unwrap_or_default();
                         let mut output = item["aggregated_output"].as_str().unwrap_or_default().to_string();
                         if status == "declined" {
-                            output = format!("[declined by the sandbox policy]\n{output}").trim_end().to_string();
+                            output = format!("[declined by the sandbox policy]\n{output}")
+                                .trim_end()
+                                .to_string();
                         }
                         let failed = exit_code.is_some_and(|code| code != 0) || matches!(status, "failed" | "declined");
-                        self.finish(&mut out, item, output, failed, Some(ToolDisplay::Command { command, exit_code, background_id: None }));
+                        self.finish(
+                            &mut out,
+                            item,
+                            output,
+                            failed,
+                            Some(ToolDisplay::Command {
+                                command,
+                                exit_code,
+                                background_id: None,
+                            }),
+                        );
                     }
                 }
                 "file_change" => {
@@ -622,30 +767,70 @@ impl LineParser for CodexParser {
                         .into_iter()
                         .flatten()
                         .map(|change| {
-                            format!("{} {}", change["kind"].as_str().unwrap_or("update"), change["path"].as_str().unwrap_or_default())
+                            format!(
+                                "{} {}",
+                                change["kind"].as_str().unwrap_or("update"),
+                                change["path"].as_str().unwrap_or_default()
+                            )
                         })
                         .collect();
                     let summary = changes.join(", ");
-                    self.start(&mut out, item, "apply_patch", ToolKind::Edit, json!({"changes": item["changes"]}), summary.clone());
+                    self.start(
+                        &mut out,
+                        item,
+                        "apply_patch",
+                        ToolKind::Edit,
+                        json!({"changes": item["changes"]}),
+                        summary.clone(),
+                    );
                     if done {
                         let failed = item["status"] == "failed";
                         self.finish(&mut out, item, changes.join("\n"), failed, None);
                     }
                 }
                 "mcp_tool_call" => {
-                    let name = format!("mcp__{}__{}", item["server"].as_str().unwrap_or("server"), item["tool"].as_str().unwrap_or("tool"));
+                    let name = format!(
+                        "mcp__{}__{}",
+                        item["server"].as_str().unwrap_or("server"),
+                        item["tool"].as_str().unwrap_or("tool")
+                    );
                     let arguments = item["arguments"].clone();
-                    self.start(&mut out, item, &name, ToolKind::Execute, arguments.clone(), swe_tools::text::truncate_line(&arguments.to_string(), 160));
+                    self.start(
+                        &mut out,
+                        item,
+                        &name,
+                        ToolKind::Execute,
+                        arguments.clone(),
+                        swe_tools::text::truncate_line(&arguments.to_string(), 160),
+                    );
                     if done {
                         let error = item["error"]["message"].as_str().or_else(|| item["error"].as_str());
-                        let text: Vec<&str> = item["result"]["content"].as_array().into_iter().flatten().filter_map(|part| part["text"].as_str()).collect();
+                        let text: Vec<&str> = item["result"]["content"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|part| part["text"].as_str())
+                            .collect();
                         let failed = error.is_some() || item["status"] == "failed";
-                        self.finish(&mut out, item, error.map(str::to_string).unwrap_or_else(|| text.join("\n")), failed, None);
+                        self.finish(
+                            &mut out,
+                            item,
+                            error.map(str::to_string).unwrap_or_else(|| text.join("\n")),
+                            failed,
+                            None,
+                        );
                     }
                 }
                 "web_search" => {
                     let query = item["query"].as_str().unwrap_or_default().to_string();
-                    self.start(&mut out, item, "web_search", ToolKind::Network, json!({"query": query}), query);
+                    self.start(
+                        &mut out,
+                        item,
+                        "web_search",
+                        ToolKind::Network,
+                        json!({"query": query}),
+                        query,
+                    );
                     if done {
                         self.finish(&mut out, item, String::new(), false, None);
                     }
@@ -658,7 +843,11 @@ impl LineParser for CodexParser {
                         .filter_map(|entry| {
                             Some(Todo {
                                 content: entry["text"].as_str()?.to_string(),
-                                status: if entry["completed"] == true { TodoStatus::Completed } else { TodoStatus::Pending },
+                                status: if entry["completed"] == true {
+                                    TodoStatus::Completed
+                                } else {
+                                    TodoStatus::Pending
+                                },
                             })
                         })
                         .collect();
@@ -666,7 +855,12 @@ impl LineParser for CodexParser {
                 }
                 "error" if done => {
                     if let Some(message) = item["message"].as_str() {
-                        out.push(event(ROOT_AGENT, EventKind::Notice { text: message.to_string() }));
+                        out.push(event(
+                            ROOT_AGENT,
+                            EventKind::Notice {
+                                text: message.to_string(),
+                            },
+                        ));
                     }
                 }
                 _ => {}
@@ -682,7 +876,12 @@ impl LineParser for CodexParser {
 pub(crate) async fn run_turn(env: &Env, meta: &SessionMeta, input: UserInput) -> (TurnOutcome, Option<String>) {
     let session = &env.session;
     let fail = |message: String| {
-        session.emit(ROOT_AGENT, EventKind::Error { message: message.clone() });
+        session.emit(
+            ROOT_AGENT,
+            EventKind::Error {
+                message: message.clone(),
+            },
+        );
         (TurnOutcome::Error, Some(message))
     };
     let binary = binary_for(meta.engine);
@@ -693,7 +892,12 @@ pub(crate) async fn run_turn(env: &Env, meta: &SessionMeta, input: UserInput) ->
         ));
     };
     if !input.images.is_empty() {
-        session.emit(ROOT_AGENT, EventKind::Notice { text: "Images are not passed on to this engine.".into() });
+        session.emit(
+            ROOT_AGENT,
+            EventKind::Notice {
+                text: "Images are not passed on to this engine.".into(),
+            },
+        );
     }
     if matches!(meta.mode, PermissionMode::Ask) {
         session.emit(
@@ -766,7 +970,9 @@ pub(crate) async fn run_turn(env: &Env, meta: &SessionMeta, input: UserInput) ->
             }
         };
         let Ok(Some(line)) = line else { break };
-        let Ok(value) = serde_json::from_str::<Value>(line.trim()) else { continue };
+        let Ok(value) = serde_json::from_str::<Value>(line.trim()) else {
+            continue;
+        };
         for out in parser.feed(&value) {
             match out {
                 Out::Event { agent_id, kind } => {
@@ -891,15 +1097,45 @@ mod tests {
                 "finished",
             ]
         );
-        let usage = outs.iter().find_map(|out| if let Out::Usage(usage) = out { Some(*usage) } else { None }).unwrap();
-        assert_eq!(usage, Usage { input_tokens: 20_130, output_tokens: 412, cache_read_tokens: 18_000, cache_write_tokens: 2_100, reasoning_tokens: 0 });
+        let usage = outs
+            .iter()
+            .find_map(|out| {
+                if let Out::Usage(usage) = out {
+                    Some(*usage)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        assert_eq!(
+            usage,
+            Usage {
+                input_tokens: 20_130,
+                output_tokens: 412,
+                cache_read_tokens: 18_000,
+                cache_write_tokens: 2_100,
+                reasoning_tokens: 0
+            }
+        );
         let edit = outs.iter().find_map(|out| match out {
-            Out::Event { kind: EventKind::ToolFinished { name, display, output, .. }, .. } if name == "Edit" => Some((display.clone(), output.clone())),
+            Out::Event {
+                kind: EventKind::ToolFinished {
+                    name, display, output, ..
+                },
+                ..
+            } if name == "Edit" => Some((display.clone(), output.clone())),
             _ => None,
         });
         let (display, output) = edit.unwrap();
         assert_eq!(output, "edited");
-        assert!(matches!(display, Some(ToolDisplay::Diff { added: 1, removed: 1, .. })));
+        assert!(matches!(
+            display,
+            Some(ToolDisplay::Diff {
+                added: 1,
+                removed: 1,
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -974,14 +1210,33 @@ mod tests {
             ]
         );
         let command = outs.iter().find_map(|out| match out {
-            Out::Event { kind: EventKind::ToolFinished { name, is_error, display, .. }, .. } if name == "bash" => Some((*is_error, display.clone())),
+            Out::Event {
+                kind:
+                    EventKind::ToolFinished {
+                        name,
+                        is_error,
+                        display,
+                        ..
+                    },
+                ..
+            } if name == "bash" => Some((*is_error, display.clone())),
             _ => None,
         });
         assert_eq!(
             command,
-            Some((true, Some(ToolDisplay::Command { command: "bash -lc 'cargo test'".into(), exit_code: Some(101), background_id: None })))
+            Some((
+                true,
+                Some(ToolDisplay::Command {
+                    command: "bash -lc 'cargo test'".into(),
+                    exit_code: Some(101),
+                    background_id: None
+                })
+            ))
         );
-        assert_eq!(kinds(&parser.feed(&json!({"type": "turn.failed", "error": {"message": "quota"}}))), ["failed:quota"]);
+        assert_eq!(
+            kinds(&parser.feed(&json!({"type": "turn.failed", "error": {"message": "quota"}}))),
+            ["failed:quota"]
+        );
     }
 
     #[test]
@@ -1007,19 +1262,55 @@ mod tests {
             external_session_id: resume.map(str::to_string),
         };
         let args = |command: Command| -> Vec<String> {
-            command.as_std().get_args().map(|arg| arg.to_string_lossy().into_owned()).collect()
+            command
+                .as_std()
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect()
         };
-        let claude = args(claude_command("claude", &meta(PermissionMode::AutoEdit, "sonnet", Some("sess-9"))));
+        let claude = args(claude_command(
+            "claude",
+            &meta(PermissionMode::AutoEdit, "sonnet", Some("sess-9")),
+        ));
         assert_eq!(
             claude,
-            ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-mode", "acceptEdits", "--model", "sonnet", "--resume", "sess-9"]
+            [
+                "-p",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--include-partial-messages",
+                "--permission-mode",
+                "acceptEdits",
+                "--model",
+                "sonnet",
+                "--resume",
+                "sess-9"
+            ]
         );
         assert!(!args(claude_command("claude", &meta(PermissionMode::Ask, "", None))).contains(&"--model".to_string()));
 
-        let codex = args(codex_command("codex", &meta(PermissionMode::FullAuto, "gpt-6.2-sol", Some("thread-1"))));
+        let codex = args(codex_command(
+            "codex",
+            &meta(PermissionMode::FullAuto, "gpt-6.2-sol", Some("thread-1")),
+        ));
         assert_eq!(
             codex,
-            ["exec", "--json", "--skip-git-repo-check", "-C", "/work", "--sandbox", "danger-full-access", "--model", "gpt-6.2-sol", "-c", "model_reasoning_effort=\"high\"", "resume", "thread-1"]
+            [
+                "exec",
+                "--json",
+                "--skip-git-repo-check",
+                "-C",
+                "/work",
+                "--sandbox",
+                "danger-full-access",
+                "--model",
+                "gpt-6.2-sol",
+                "-c",
+                "model_reasoning_effort=\"high\"",
+                "resume",
+                "thread-1"
+            ]
         );
         assert!(args(codex_command("codex", &meta(PermissionMode::Ask, "", None))).contains(&"read-only".to_string()));
     }

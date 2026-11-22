@@ -56,7 +56,11 @@ pub fn unified_diff(path: &str, before: &str, after: &str) -> DiffSummary {
         .context_radius(3)
         .header(&format!("a/{path}"), &format!("b/{path}"))
         .to_string();
-    DiffSummary { unified, added, removed }
+    DiffSummary {
+        unified,
+        added,
+        removed,
+    }
 }
 
 /// Reduce an HTML document to readable plain text.
@@ -106,10 +110,10 @@ pub fn html_to_text(html: &str) -> String {
             "li" if !closing => out.push_str("\n- "),
             "td" | "th" if closing => out.push('\t'),
             "a" if !closing => {
-                if let Some(href) = attribute(tag, "href") {
-                    if href.starts_with("http") {
-                        out.push_str(&format!("[{href}] "));
-                    }
+                if let Some(href) = attribute(tag, "href")
+                    && href.starts_with("http")
+                {
+                    out.push_str(&format!("[{href}] "));
                 }
             }
             _ => {}

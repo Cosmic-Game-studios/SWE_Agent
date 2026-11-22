@@ -1,0 +1,115 @@
+Scenarios for the offline demo model (see crates/swe-llm/src/mock.rs).
+The model's turns below are scripted; everything else in a demo run is real:
+the agent loop, the tools, approvals, sub-agents, git worktrees and the UI.
+
+## add a delete method
+!think The store exposes add, get and all. I need a delete that fails loudly for unknown ids, plus a test. Let me read the store and its test first.
+!say I'll read the store and its tests first.
+!tool read_file {"path": "src/store.py"}
+!tool read_file {"path": "tests/test_store.py"}
+!then
+!say The store keeps notes in a dict keyed by id, so `delete` is a `pop`. Here is the plan:
+!tool todo_write {"todos": [{"content": "Add NoteStore.delete", "status": "in_progress"}, {"content": "Cover delete with tests", "status": "pending"}, {"content": "Run the test suite", "status": "pending"}]}
+!tool edit_file {"path": "src/store.py", "old_string": "    def all(self):", "new_string": "    def delete(self, note_id):\n        \"\"\"Remove a note and return it. Raises KeyError for unknown ids.\"\"\"\n        return self._notes.pop(note_id)\n\n    def all(self):"}
+!then
+!tool todo_write {"todos": [{"content": "Add NoteStore.delete", "status": "completed"}, {"content": "Cover delete with tests", "status": "in_progress"}, {"content": "Run the test suite", "status": "pending"}]}
+!tool edit_file {"path": "tests/test_store.py", "old_string": "\n\nif __name__ == \"__main__\":", "new_string": "\n    def test_delete_removes_the_note(self):\n        store = NoteStore()\n        note = store.add(\"Buy milk\")\n        self.assertEqual(store.delete(note[\"id\"]), note)\n        self.assertEqual(store.all(), [])\n\n    def test_delete_unknown_id_raises(self):\n        with self.assertRaises(KeyError):\n            NoteStore().delete(42)\n\n\nif __name__ == \"__main__\":"}
+!then
+!tool todo_write {"todos": [{"content": "Add NoteStore.delete", "status": "completed"}, {"content": "Cover delete with tests", "status": "completed"}, {"content": "Run the test suite", "status": "in_progress"}]}
+!tool bash {"command": "python3 -m unittest discover -s tests -v"}
+!then
+!tool todo_write {"todos": [{"content": "Add NoteStore.delete", "status": "completed"}, {"content": "Cover delete with tests", "status": "completed"}, {"content": "Run the test suite", "status": "completed"}]}
+!then
+!say `NoteStore.delete` is in and all 3 tests pass.
+!say
+!say - `src/store.py`: `delete(note_id)` removes the note and returns it; an unknown id raises `KeyError`, matching `get`.
+!say - `tests/test_store.py`: two new tests, one for the happy path and one for the unknown id.
+!say
+!say Nothing is committed; the changes are in the working tree.
+
+## commit it
+!tool bash {"command": "git add -A && git commit -q -m \"Add NoteStore.delete with tests\" && git log --oneline -2"}
+!then
+!say Committed as `Add NoteStore.delete with tests`.
+
+## add tags and search
+!think Two independent features: tags touch the store itself, search can live in its own module. That splits cleanly across two workers. First I need to know the store's shape, then I can hand out the pieces in parallel worktrees and merge.
+!say I'll survey the code first, then split the work.
+!tool task {"description": "Map the store API", "agent_type": "explore", "prompt": "Survey the notes store: list the Python files, read src/store.py and tests/test_store.py, and report the public methods of NoteStore, how notes are represented, and how the tests are run."}
+!then
+!say The store is a small in-memory class with unittest tests. Tags and search do not overlap, so two agents can build them in parallel, each in its own git worktree:
+!tool todo_write {"todos": [{"content": "Survey the store", "status": "completed"}, {"content": "Tags: store support and tests", "status": "in_progress"}, {"content": "Search: module and tests", "status": "in_progress"}, {"content": "Merge both branches and run all tests", "status": "pending"}, {"content": "Independent review", "status": "pending"}]}
+!tool task {"description": "Implement note tags", "agent_type": "general", "isolation": "worktree", "prompt": "Implement note tags. In src/store.py let NoteStore.add accept an optional list of tags stored on the note, and add NoteStore.with_tag(tag) returning the notes that carry it. Add tests in tests/test_tags.py and run the suite with python3 -m unittest discover -s tests. Report what you changed."}
+!tool task {"description": "Implement full-text search", "agent_type": "general", "isolation": "worktree", "prompt": "Implement full-text search. Create src/search.py with search(store, query) returning the notes whose title or body contains the query, case-insensitively. Add tests in tests/test_search.py and run the suite with python3 -m unittest discover -s tests. Do not modify src/store.py. Report what you changed."}
+!then
+!say Both agents are done and their branches do not touch the same files. Merging them into the working tree and running everything together:
+!tool todo_write {"todos": [{"content": "Survey the store", "status": "completed"}, {"content": "Tags: store support and tests", "status": "completed"}, {"content": "Search: module and tests", "status": "completed"}, {"content": "Merge both branches and run all tests", "status": "in_progress"}, {"content": "Independent review", "status": "pending"}]}
+!tool bash {"command": "git merge --no-commit --no-ff $(git branch --list 'swe/*' --format='%(refname:short)') && python3 -m unittest discover -s tests"}
+!then
+!tool todo_write {"todos": [{"content": "Survey the store", "status": "completed"}, {"content": "Tags: store support and tests", "status": "completed"}, {"content": "Search: module and tests", "status": "completed"}, {"content": "Merge both branches and run all tests", "status": "completed"}, {"content": "Independent review", "status": "in_progress"}]}
+!tool task {"description": "Review the merged change", "agent_type": "review", "prompt": "Review the merged change for tags and search: inspect the staged diff, read the new code, run the full test suite and report any problem you can confirm."}
+!then
+!tool todo_write {"todos": [{"content": "Survey the store", "status": "completed"}, {"content": "Tags: store support and tests", "status": "completed"}, {"content": "Search: module and tests", "status": "completed"}, {"content": "Merge both branches and run all tests", "status": "completed"}, {"content": "Independent review", "status": "completed"}]}
+!then
+!say Tags and search are both in, merged, and the full suite passes (6 tests). The reviewer found no problems.
+!say
+!say - **Tags** (`src/store.py`, `tests/test_tags.py`): `add(title, body, tags=None)` stores the tags, `with_tag(tag)` filters by them.
+!say - **Search** (`src/search.py`, `tests/test_search.py`): `search(store, query)` matches title and body, case-insensitively.
+!say
+!say Both branches are merged into the working tree but not committed, so you can look over the diff first.
+
+## survey the notes store
+!tool glob {"pattern": "**/*.py"}
+!tool read_file {"path": "src/store.py"}
+!tool read_file {"path": "tests/test_store.py"}
+!then
+!say **NoteStore** (`src/store.py`) keeps notes in a dict keyed by an auto-incrementing id.
+!say
+!say - `add(title, body="")` returns the new note as `{"id", "title", "body"}`
+!say - `get(note_id)` raises `KeyError` for unknown ids
+!say - `all()` returns every note as a list
+!say
+!say Tests are `unittest` cases in `tests/`, run with `python3 -m unittest discover -s tests`. There is no packaging; tests add `src/` to `sys.path` themselves.
+
+## implement note tags
+!think Tags are stored on the note itself. Keep the default an empty list so existing callers keep working.
+!tool read_file {"path": "src/store.py"}
+!then
+!tool edit_file {"path": "src/store.py", "old_string": "    def add(self, title, body=\"\"):\n        note = {\"id\": self._next_id, \"title\": title, \"body\": body}", "new_string": "    def add(self, title, body=\"\", tags=None):\n        note = {\"id\": self._next_id, \"title\": title, \"body\": body, \"tags\": list(tags or [])}"}
+!then
+!tool edit_file {"path": "src/store.py", "old_string": "    def all(self):", "new_string": "    def with_tag(self, tag):\n        return [note for note in self._notes.values() if tag in note[\"tags\"]]\n\n    def all(self):"}
+!tool write_file {"path": "tests/test_tags.py", "content": "import pathlib\nimport sys\nimport unittest\n\nsys.path.insert(0, str(pathlib.Path(__file__).parent.parent / \"src\"))\nfrom store import NoteStore\n\n\nclass TagsTest(unittest.TestCase):\n    def test_notes_default_to_no_tags(self):\n        self.assertEqual(NoteStore().add(\"Plain\")[\"tags\"], [])\n\n    def test_with_tag_filters_notes(self):\n        store = NoteStore()\n        store.add(\"Buy milk\", tags=[\"shopping\"])\n        work = store.add(\"Ship release\", tags=[\"work\", \"urgent\"])\n        self.assertEqual(store.with_tag(\"urgent\"), [work])\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"}
+!then
+!tool bash {"command": "python3 -m unittest discover -s tests"}
+!then
+!say Tags are implemented and the suite passes (5 tests).
+!say
+!say - `src/store.py`: `add` takes an optional `tags` list (default empty), new `with_tag(tag)`.
+!say - `tests/test_tags.py`: default tags and filtering.
+
+## implement full-text search
+!think Search stays out of the store: a function over store.all() keeps it independent of the tags work.
+!tool read_file {"path": "src/store.py"}
+!then
+!tool write_file {"path": "src/search.py", "content": "\"\"\"Full-text search over a NoteStore.\"\"\"\n\n\ndef search(store, query):\n    \"\"\"Notes whose title or body contains `query`, ignoring case.\"\"\"\n    needle = query.lower()\n    return [\n        note\n        for note in store.all()\n        if needle in note[\"title\"].lower() or needle in note[\"body\"].lower()\n    ]\n"}
+!tool write_file {"path": "tests/test_search.py", "content": "import pathlib\nimport sys\nimport unittest\n\nsys.path.insert(0, str(pathlib.Path(__file__).parent.parent / \"src\"))\nfrom search import search\nfrom store import NoteStore\n\n\nclass SearchTest(unittest.TestCase):\n    def test_matches_title_and_body_ignoring_case(self):\n        store = NoteStore()\n        milk = store.add(\"Buy MILK\")\n        note = store.add(\"Groceries\", body=\"milk, eggs\")\n        store.add(\"Unrelated\")\n        self.assertEqual(search(store, \"milk\"), [milk, note])\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"}
+!then
+!tool bash {"command": "python3 -m unittest discover -s tests"}
+!then
+!say Search is implemented and the suite passes (4 tests).
+!say
+!say - `src/search.py`: `search(store, query)`, case-insensitive over title and body.
+!say - `tests/test_search.py`: title and body matches.
+
+## review the merged change
+!tool bash {"command": "git diff --cached --stat"}
+!tool read_file {"path": "src/search.py"}
+!tool read_file {"path": "src/store.py"}
+!then
+!tool bash {"command": "python3 -m unittest discover -s tests -v"}
+!then
+!say No problems found.
+!say
+!say - Confirmed: all 6 tests pass on the merged tree.
+!say - `with_tag` and `search` are read-only and cannot affect existing behaviour; `add` stays backward compatible because `tags` defaults to an empty list.
+!say - Not covered: `search` with an empty query returns every note, which may or may not be intended.

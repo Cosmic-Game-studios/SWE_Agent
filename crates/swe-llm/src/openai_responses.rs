@@ -36,7 +36,11 @@ pub struct OpenAiResponses {
 
 impl OpenAiResponses {
     pub fn new(settings: ProviderSettings, client: reqwest::Client) -> Self {
-        OpenAiResponses { settings, client, rejected: Mutex::new(HashSet::new()) }
+        OpenAiResponses {
+            settings,
+            client,
+            rejected: Mutex::new(HashSet::new()),
+        }
     }
 
     fn request(&self, method: reqwest::Method, path: &str) -> Result<reqwest::RequestBuilder, LlmError> {
@@ -66,7 +70,10 @@ impl OpenAiResponses {
         if !request.system.is_empty() {
             body.insert("instructions".into(), json!(request.system));
         }
-        body.insert("input".into(), Value::Array(convert_messages(&request.messages, &request.model)));
+        body.insert(
+            "input".into(),
+            Value::Array(convert_messages(&request.messages, &request.model)),
+        );
         if !request.tools.is_empty() {
             let tools: Vec<Value> = request
                 .tools
@@ -126,7 +133,10 @@ impl OpenAiResponses {
             .unwrap_or_default()
             .to_string();
         let message = failure.message().to_ascii_lowercase();
-        let setting = if param == "reasoning.summary" || message.contains("reasoning.summary") || message.contains("reasoning summar") {
+        let setting = if param == "reasoning.summary"
+            || message.contains("reasoning.summary")
+            || message.contains("reasoning summar")
+        {
             "summary"
         } else if (param == "reasoning.effort" || message.contains("reasoning.effort"))
             && request.effort == Effort::Xhigh
@@ -138,7 +148,10 @@ impl OpenAiResponses {
         } else {
             return false;
         };
-        self.rejected.lock().unwrap().insert(format!("{}\0{setting}", request.model))
+        self.rejected
+            .lock()
+            .unwrap()
+            .insert(format!("{}\0{setting}", request.model))
     }
 }
 
@@ -146,8 +159,12 @@ impl OpenAiResponses {
 fn is_terminal_code(code: &str) -> bool {
     matches!(
         code,
-        "insufficient_quota" | "credit_balance_exhausted" | "invalid_prompt" | "content_policy_violation"
-            | "cyber_policy" | "bio_policy"
+        "insufficient_quota"
+            | "credit_balance_exhausted"
+            | "invalid_prompt"
+            | "content_policy_violation"
+            | "cyber_policy"
+            | "bio_policy"
     ) || code.ends_with("spend_limit_exceeded")
 }
 
@@ -163,7 +180,13 @@ fn map_failure(failure: ApiFailure, provider: &str) -> LlmError {
     }
     let status = failure.status;
     match failure.into_error(provider) {
-        LlmError::Api { provider, message, retryable, retry_after, .. } => LlmError::Api {
+        LlmError::Api {
+            provider,
+            message,
+            retryable,
+            retry_after,
+            ..
+        } => LlmError::Api {
             provider,
             status,
             message,
@@ -176,7 +199,11 @@ fn map_failure(failure: ApiFailure, provider: &str) -> LlmError {
 
 /// Map an error reported inside the stream (`error` / `response.failed`).
 fn stream_error(code: &str, message: &str) -> LlmError {
-    let text = if code.is_empty() { message.to_string() } else { format!("{code}: {message}") };
+    let text = if code.is_empty() {
+        message.to_string()
+    } else {
+        format!("{code}: {message}")
+    };
     match code {
         "context_length_exceeded" => LlmError::ContextOverflow(text),
         "rate_limit_exceeded" | "server_error" | "slow_down" | "server_is_overloaded" => LlmError::Stream(text),
@@ -219,7 +246,9 @@ impl Provider for OpenAiResponses {
                 }
             }
         }
-        Err(LlmError::Protocol("request kept being rejected after downgrades".into()))
+        Err(LlmError::Protocol(
+            "request kept being rejected after downgrades".into(),
+        ))
     }
 
     async fn list_models(&self) -> Result<Vec<ModelInfo>, LlmError> {
@@ -236,7 +265,12 @@ impl Provider for OpenAiResponses {
             .filter(|id| is_text_model(id))
             .map(|id| {
                 let (context_window, max_output_tokens) = known_limits(id);
-                ModelInfo { id: id.to_string(), name: id.to_string(), context_window, max_output_tokens }
+                ModelInfo {
+                    id: id.to_string(),
+                    name: id.to_string(),
+                    context_window,
+                    max_output_tokens,
+                }
             })
             .collect();
         // Newest families first: the listing itself is unordered.
@@ -250,8 +284,19 @@ impl Provider for OpenAiResponses {
 fn is_text_model(id: &str) -> bool {
     const PREFIXES: &[&str] = &["gpt-", "o1", "o3", "o4", "codex", "chatgpt-"];
     const EXCLUDED: &[&str] = &[
-        "embedding", "audio", "realtime", "tts", "transcribe", "whisper", "image", "dall-e", "sora", "moderation",
-        "search", "instruct", "computer-use",
+        "embedding",
+        "audio",
+        "realtime",
+        "tts",
+        "transcribe",
+        "whisper",
+        "image",
+        "dall-e",
+        "sora",
+        "moderation",
+        "search",
+        "instruct",
+        "computer-use",
     ];
     PREFIXES.iter().any(|prefix| id.starts_with(prefix)) && !EXCLUDED.iter().any(|word| id.contains(word))
 }
@@ -275,7 +320,12 @@ fn convert_messages(messages: &[Message], model: &str) -> Vec<Value> {
         match message.role {
             Role::User => {
                 for block in &message.content {
-                    if let ContentBlock::ToolResult { tool_call_id, content, is_error } = block {
+                    if let ContentBlock::ToolResult {
+                        tool_call_id,
+                        content,
+                        is_error,
+                    } = block
+                    {
                         let output = if *is_error && !content.starts_with("Error") {
                             format!("Error: {content}")
                         } else {
@@ -324,7 +374,13 @@ fn convert_messages(messages: &[Message], model: &str) -> Vec<Value> {
                                 }
                             }
                         }
-                        ContentBlock::ToolCall { id, name, input, invalid_json, meta } => match own(meta) {
+                        ContentBlock::ToolCall {
+                            id,
+                            name,
+                            input,
+                            invalid_json,
+                            meta,
+                        } => match own(meta) {
                             Some(meta) => items.push(meta.raw),
                             None => items.push(json!({
                                 "type": "function_call",
@@ -359,8 +415,8 @@ async fn read_stream(mut sse: SseReader, emitter: Emitter, model: String) -> Res
         if data.is_empty() || data == "[DONE]" {
             continue;
         }
-        let payload: Value = serde_json::from_str(data)
-            .map_err(|e| LlmError::Protocol(format!("invalid JSON in stream event: {e}")))?;
+        let payload: Value =
+            serde_json::from_str(data).map_err(|e| LlmError::Protocol(format!("invalid JSON in stream event: {e}")))?;
         let kind = payload["type"].as_str().unwrap_or(&event.event).to_string();
         let output_index = payload["output_index"].as_u64().unwrap_or(0) as usize;
         match kind.as_str() {
@@ -393,7 +449,10 @@ async fn read_stream(mut sse: SseReader, emitter: Emitter, model: String) -> Res
                 let fragment = payload["delta"].as_str().unwrap_or_default();
                 if !fragment.is_empty() {
                     emitter
-                        .emit(StreamEvent::ToolCallDelta { index: output_index, fragment: fragment.to_string() })
+                        .emit(StreamEvent::ToolCallDelta {
+                            index: output_index,
+                            fragment: fragment.to_string(),
+                        })
                         .await?;
                 }
             }
@@ -426,7 +485,11 @@ async fn read_stream(mut sse: SseReader, emitter: Emitter, model: String) -> Res
             }
             "error" => {
                 // Flat `{code, message}` or nested `{error: {...}}`.
-                let error = if payload["error"].is_object() { &payload["error"] } else { &payload };
+                let error = if payload["error"].is_object() {
+                    &payload["error"]
+                } else {
+                    &payload
+                };
                 return Err(ReadError::Failed(stream_error(
                     error["code"].as_str().unwrap_or_default(),
                     error["message"].as_str().unwrap_or("unknown stream error"),
@@ -460,7 +523,10 @@ async fn read_stream(mut sse: SseReader, emitter: Emitter, model: String) -> Res
 
     emitter
         .emit(StreamEvent::Completed(Completion {
-            message: Message { role: Role::Assistant, content },
+            message: Message {
+                role: Role::Assistant,
+                content,
+            },
             usage: convert_usage(&response["usage"]),
             stop_reason,
             model: response["model"].as_str().map(str::to_string),
@@ -482,7 +548,13 @@ fn convert_usage(raw: &Value) -> Usage {
 /// Turn completed output items into content blocks. The second value says
 /// whether the model refused.
 fn assemble(output: Vec<Value>, model: &str) -> (Vec<ContentBlock>, bool) {
-    let meta = |raw: Value| Some(ProviderMeta { protocol: PROTOCOL.to_string(), model: model.to_string(), raw });
+    let meta = |raw: Value| {
+        Some(ProviderMeta {
+            protocol: PROTOCOL.to_string(),
+            model: model.to_string(),
+            raw,
+        })
+    };
     let mut content = Vec::new();
     let mut refused = false;
     for item in output {
@@ -502,21 +574,33 @@ fn assemble(output: Vec<Value>, model: &str) -> (Vec<ContentBlock>, bool) {
                 content.push(ContentBlock::Text { text, meta: meta(item) });
             }
             "reasoning" => {
-                let parts = item["summary"].as_array().into_iter().flatten().chain(item["content"].as_array().into_iter().flatten());
+                let parts = item["summary"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .chain(item["content"].as_array().into_iter().flatten());
                 let text: Vec<&str> = parts.filter_map(|part| part["text"].as_str()).collect();
-                content.push(ContentBlock::Reasoning { text: text.join("\n\n"), meta: meta(item) });
+                content.push(ContentBlock::Reasoning {
+                    text: text.join("\n\n"),
+                    meta: meta(item),
+                });
             }
             "function_call" => {
                 let (input, invalid_json) = http::parse_tool_arguments(item["arguments"].as_str().unwrap_or_default());
                 content.push(ContentBlock::ToolCall {
-                    id: item["call_id"].as_str().map(str::to_string).unwrap_or_else(http::new_call_id),
+                    id: item["call_id"]
+                        .as_str()
+                        .map(str::to_string)
+                        .unwrap_or_else(http::new_call_id),
                     name: item["name"].as_str().unwrap_or_default().to_string(),
                     input,
                     invalid_json,
                     meta: meta(item),
                 });
             }
-            _ => content.push(ContentBlock::Opaque { meta: meta(item).expect("meta is always built") }),
+            _ => content.push(ContentBlock::Opaque {
+                meta: meta(item).expect("meta is always built"),
+            }),
         }
     }
     (content, refused)
@@ -545,7 +629,11 @@ mod tests {
             model: model.into(),
             system: "sys".into(),
             messages,
-            tools: vec![ToolSpec { name: "bash".into(), description: "Run".into(), input_schema: json!({"type": "object"}) }],
+            tools: vec![ToolSpec {
+                name: "bash".into(),
+                description: "Run".into(),
+                input_schema: json!({"type": "object"}),
+            }],
             max_output_tokens: None,
             effort,
             cache_key: Some("session-1".into()),
@@ -553,8 +641,15 @@ mod tests {
     }
 
     fn failure(param: &str, message: &str) -> ApiFailure {
-        let json = json!({"error": {"message": message, "type": "invalid_request_error", "param": param, "code": null}});
-        ApiFailure { status: 400, retry_after: None, should_retry: None, body: json.to_string(), json: Some(json) }
+        let json =
+            json!({"error": {"message": message, "type": "invalid_request_error", "param": param, "code": null}});
+        ApiFailure {
+            status: 400,
+            retry_after: None,
+            should_retry: None,
+            body: json.to_string(),
+            json: Some(json),
+        }
     }
 
     #[test]
@@ -566,8 +661,14 @@ mod tests {
         assert_eq!(body["reasoning"], json!({"effort": "xhigh", "summary": "auto"}));
         assert_eq!(body["include"], json!(["reasoning.encrypted_content"]));
         assert_eq!(body["prompt_cache_key"], "session-1");
-        assert_eq!(body["tools"][0], json!({"type": "function", "name": "bash", "description": "Run", "parameters": {"type": "object"}, "strict": false}));
-        assert_eq!(body["input"][0], json!({"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hi"}]}));
+        assert_eq!(
+            body["tools"][0],
+            json!({"type": "function", "name": "bash", "description": "Run", "parameters": {"type": "object"}, "strict": false})
+        );
+        assert_eq!(
+            body["input"][0],
+            json!({"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hi"}]})
+        );
         assert!(body.get("temperature").is_none());
         assert!(body.get("max_output_tokens").is_none());
     }
@@ -576,18 +677,43 @@ mod tests {
     fn rejected_reasoning_settings_degrade_step_by_step() {
         let p = provider();
         let req = request("gpt-x", Effort::Xhigh, vec![]);
-        assert!(p.downgrade(&req, &failure("reasoning.summary", "Your organization must be verified to generate reasoning summaries.")));
+        assert!(p.downgrade(
+            &req,
+            &failure(
+                "reasoning.summary",
+                "Your organization must be verified to generate reasoning summaries."
+            )
+        ));
         assert_eq!(p.build_body(&req)["reasoning"], json!({"effort": "xhigh"}));
-        assert!(p.downgrade(&req, &failure("reasoning.effort", "Unsupported value: 'xhigh' is not supported with this model.")));
+        assert!(p.downgrade(
+            &req,
+            &failure(
+                "reasoning.effort",
+                "Unsupported value: 'xhigh' is not supported with this model."
+            )
+        ));
         assert_eq!(p.build_body(&req)["reasoning"], json!({"effort": "high"}));
-        assert!(p.downgrade(&req, &failure("reasoning.effort", "Unsupported parameter: 'reasoning.effort' is not supported with this model.")));
+        assert!(p.downgrade(
+            &req,
+            &failure(
+                "reasoning.effort",
+                "Unsupported parameter: 'reasoning.effort' is not supported with this model."
+            )
+        ));
         let plain = p.build_body(&req);
         assert!(plain.get("reasoning").is_none());
         assert!(plain.get("include").is_none());
-        assert!(!p.downgrade(&req, &failure("reasoning.effort", "still unhappy")), "nothing left to drop");
+        assert!(
+            !p.downgrade(&req, &failure("reasoning.effort", "still unhappy")),
+            "nothing left to drop"
+        );
         assert!(!p.downgrade(&req, &failure("input", "Invalid input")));
         // Other models are unaffected.
-        assert!(p.build_body(&request("gpt-6.2-sol", Effort::High, vec![])).get("reasoning").is_some());
+        assert!(
+            p.build_body(&request("gpt-6.2-sol", Effort::High, vec![]))
+                .get("reasoning")
+                .is_some()
+        );
     }
 
     #[test]
@@ -599,16 +725,27 @@ mod tests {
         let (content, refused) = assemble(vec![reasoning.clone(), message.clone(), call.clone()], "gpt-6.2-sol");
         assert!(!refused);
         assert!(matches!(&content[1], ContentBlock::Text { text, .. } if text == "Checking."));
-        assert!(matches!(&content[2], ContentBlock::ToolCall { id, input, .. } if id == "call_1" && input["command"] == "ls"));
+        assert!(
+            matches!(&content[2], ContentBlock::ToolCall { id, input, .. } if id == "call_1" && input["command"] == "ls")
+        );
 
         let history = vec![
             Message::user_text("go"),
-            Message { role: Role::Assistant, content },
-            Message { role: Role::User, content: vec![ContentBlock::tool_result("call_1", "README.md", false)] },
+            Message {
+                role: Role::Assistant,
+                content,
+            },
+            Message {
+                role: Role::User,
+                content: vec![ContentBlock::tool_result("call_1", "README.md", false)],
+            },
         ];
         let same_model = convert_messages(&history, "gpt-6.2-sol");
         assert_eq!(same_model[1..4], [reasoning, message.clone(), call.clone()]);
-        assert_eq!(same_model[4], json!({"type": "function_call_output", "call_id": "call_1", "output": "README.md"}));
+        assert_eq!(
+            same_model[4],
+            json!({"type": "function_call_output", "call_id": "call_1", "output": "README.md"})
+        );
 
         let other_model = convert_messages(&history, "gpt-6.2-astra");
         assert_eq!(other_model[1..3], [message, call], "reasoning is bound to its model");
@@ -621,26 +758,57 @@ mod tests {
             Message {
                 role: Role::Assistant,
                 content: vec![
-                    ContentBlock::Reasoning { text: "x".into(), meta: Some(ProviderMeta { protocol: "anthropic".into(), model: "c".into(), raw: json!({}) }) },
+                    ContentBlock::Reasoning {
+                        text: "x".into(),
+                        meta: Some(ProviderMeta {
+                            protocol: "anthropic".into(),
+                            model: "c".into(),
+                            raw: json!({}),
+                        }),
+                    },
                     ContentBlock::text("Listing."),
-                    ContentBlock::ToolCall { id: "toolu_1".into(), name: "bash".into(), input: json!({"command": "ls"}), invalid_json: None, meta: None },
+                    ContentBlock::ToolCall {
+                        id: "toolu_1".into(),
+                        name: "bash".into(),
+                        input: json!({"command": "ls"}),
+                        invalid_json: None,
+                        meta: None,
+                    },
                 ],
             },
-            Message { role: Role::User, content: vec![ContentBlock::tool_result("toolu_1", "nope", true)] },
+            Message {
+                role: Role::User,
+                content: vec![ContentBlock::tool_result("toolu_1", "nope", true)],
+            },
         ];
         let items = convert_messages(&history, "gpt-6.2-sol");
         assert_eq!(items.len(), 4);
-        assert_eq!(items[1]["content"][0], json!({"type": "output_text", "text": "Listing."}));
-        assert_eq!(items[2], json!({"type": "function_call", "call_id": "toolu_1", "name": "bash", "arguments": "{\"command\":\"ls\"}"}));
+        assert_eq!(
+            items[1]["content"][0],
+            json!({"type": "output_text", "text": "Listing."})
+        );
+        assert_eq!(
+            items[2],
+            json!({"type": "function_call", "call_id": "toolu_1", "name": "bash", "arguments": "{\"command\":\"ls\"}"})
+        );
         assert_eq!(items[3]["output"], "Error: nope");
     }
 
     #[test]
     fn spend_limits_are_terminal_even_as_429() {
         let json = json!({"error": {"message": "Spend limit reached", "code": "project_spend_limit_exceeded"}});
-        let failure = ApiFailure { status: 429, retry_after: None, should_retry: None, body: json.to_string(), json: Some(json) };
+        let failure = ApiFailure {
+            status: 429,
+            retry_after: None,
+            should_retry: None,
+            body: json.to_string(),
+            json: Some(json),
+        };
         assert!(!map_failure(failure, "openai").is_retryable());
-        assert!(matches!(stream_error("context_length_exceeded", "too long"), LlmError::ContextOverflow(_)));
+        assert!(matches!(
+            stream_error("context_length_exceeded", "too long"),
+            LlmError::ContextOverflow(_)
+        ));
         assert!(stream_error("rate_limit_exceeded", "slow down").is_retryable());
         assert!(!stream_error("invalid_prompt", "no").is_retryable());
     }

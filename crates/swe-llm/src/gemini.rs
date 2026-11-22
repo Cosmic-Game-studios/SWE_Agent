@@ -152,7 +152,11 @@ fn clean_schema(schema: &Value) -> Value {
 }
 
 fn map_failure(failure: ApiFailure, provider: &str) -> LlmError {
-    let error = failure.json.as_ref().map(|json| json["error"].clone()).unwrap_or(Value::Null);
+    let error = failure
+        .json
+        .as_ref()
+        .map(|json| json["error"].clone())
+        .unwrap_or(Value::Null);
     let mut retry_after = failure.retry_after;
     let mut daily_quota = false;
     let mut invalid_key = false;
@@ -175,7 +179,13 @@ fn map_failure(failure: ApiFailure, provider: &str) -> LlmError {
         return LlmError::Auth(format!("{provider}: {}", failure.message()));
     }
     match failure.into_error(provider) {
-        LlmError::Api { provider, status, message, retryable, .. } => LlmError::Api {
+        LlmError::Api {
+            provider,
+            status,
+            message,
+            retryable,
+            ..
+        } => LlmError::Api {
             provider,
             status,
             message,
@@ -220,7 +230,8 @@ impl Provider for Gemini {
                 }
                 Err(failure) => {
                     let message = failure.message().to_ascii_lowercase();
-                    let about_level = message.contains("thinking_level") || message.contains("thinkinglevel")
+                    let about_level = message.contains("thinking_level")
+                        || message.contains("thinkinglevel")
                         || message.contains("thinking level");
                     if failure.status == 400
                         && about_level
@@ -300,7 +311,12 @@ fn convert_messages(messages: &[Message]) -> Vec<Value> {
             Role::User => {
                 // All function responses of a step go first, in one content.
                 for block in &message.content {
-                    if let ContentBlock::ToolResult { tool_call_id, content, is_error } = block {
+                    if let ContentBlock::ToolResult {
+                        tool_call_id,
+                        content,
+                        is_error,
+                    } = block
+                    {
                         let (name, wire_id) = calls
                             .get(tool_call_id.as_str())
                             .cloned()
@@ -339,7 +355,9 @@ fn convert_messages(messages: &[Message]) -> Vec<Value> {
                                 parts.push(raw);
                             }
                         }
-                        ContentBlock::ToolCall { id, name, input, meta, .. } => match own_raw(meta) {
+                        ContentBlock::ToolCall {
+                            id, name, input, meta, ..
+                        } => match own_raw(meta) {
                             Some(raw) => parts.push(raw),
                             None => parts.push(json!({"functionCall": {"id": id, "name": name, "args": input}})),
                         },
@@ -354,10 +372,8 @@ fn convert_messages(messages: &[Message]) -> Vec<Value> {
                 // A function-call step without any signature (foreign history,
                 // or a model that does not sign) would be rejected by Gemini 3+.
                 let signed = parts.iter().any(|part| part.get("thoughtSignature").is_some());
-                if !signed {
-                    if let Some(call) = parts.iter_mut().find(|part| part.get("functionCall").is_some()) {
-                        call["thoughtSignature"] = json!(SIGNATURE_BYPASS);
-                    }
+                if !signed && let Some(call) = parts.iter_mut().find(|part| part.get("functionCall").is_some()) {
+                    call["thoughtSignature"] = json!(SIGNATURE_BYPASS);
                 }
             }
         }
@@ -405,7 +421,11 @@ async fn read_stream(mut sse: SseReader, emitter: Emitter, requested_model: Stri
                 json: Some(chunk),
             };
             return Err(ReadError::Failed(match map_failure(failure, "gemini") {
-                LlmError::Api { message, retryable: true, .. } => LlmError::Stream(message),
+                LlmError::Api {
+                    message,
+                    retryable: true,
+                    ..
+                } => LlmError::Stream(message),
                 other => other,
             }));
         }
@@ -452,11 +472,15 @@ async fn read_stream(mut sse: SseReader, emitter: Emitter, requested_model: Stri
 
     let mut content = assemble(parts, &model);
     let has_calls = content.iter().any(|b| matches!(b, ContentBlock::ToolCall { .. }));
-    let has_text = content.iter().any(|b| matches!(b, ContentBlock::Text { text, .. } if !text.trim().is_empty()));
+    let has_text = content
+        .iter()
+        .any(|b| matches!(b, ContentBlock::Text { text, .. } if !text.trim().is_empty()));
 
     let stop_reason = match (finish.as_deref(), &block_reason) {
         (None, Some(reason)) => {
-            content.push(ContentBlock::text(format!("[The prompt was blocked by the provider: {reason}]")));
+            content.push(ContentBlock::text(format!(
+                "[The prompt was blocked by the provider: {reason}]"
+            )));
             StopReason::Refusal
         }
         (None, None) => {
@@ -469,15 +493,21 @@ async fn read_stream(mut sse: SseReader, emitter: Emitter, requested_model: Stri
         (Some("STOP"), _) => {
             // Known failure mode: the model stops having produced nothing
             // (or only thoughts). Asking again usually works.
-            return Err(ReadError::Failed(LlmError::Stream("the model returned an empty response".into())));
+            return Err(ReadError::Failed(LlmError::Stream(
+                "the model returned an empty response".into(),
+            )));
         }
         (Some("MAX_TOKENS"), _) => StopReason::MaxTokens,
         (Some(reason @ ("MALFORMED_FUNCTION_CALL" | "UNEXPECTED_TOOL_CALL" | "MALFORMED_RESPONSE")), _) => {
             let detail = finish_message.unwrap_or_default();
-            return Err(ReadError::Failed(LlmError::Stream(format!("{reason} {detail}").trim().to_string())));
+            return Err(ReadError::Failed(LlmError::Stream(
+                format!("{reason} {detail}").trim().to_string(),
+            )));
         }
         (Some(reason @ ("SAFETY" | "RECITATION" | "BLOCKLIST" | "PROHIBITED_CONTENT" | "SPII" | "LANGUAGE")), _) => {
-            content.push(ContentBlock::text(format!("[The response was blocked by the provider: {reason}]")));
+            content.push(ContentBlock::text(format!(
+                "[The response was blocked by the provider: {reason}]"
+            )));
             StopReason::Refusal
         }
         (Some(other), _) if has_calls => {
@@ -489,7 +519,10 @@ async fn read_stream(mut sse: SseReader, emitter: Emitter, requested_model: Stri
 
     emitter
         .emit(StreamEvent::Completed(Completion {
-            message: Message { role: Role::Assistant, content },
+            message: Message {
+                role: Role::Assistant,
+                content,
+            },
             usage,
             stop_reason,
             model: Some(model),
@@ -518,24 +551,33 @@ fn push_part(parts: &mut Vec<Value>, part: Value) {
     let plain_text = |p: &Value| {
         p.get("text").is_some_and(Value::is_string)
             && p.get("thoughtSignature").is_none()
-            && p.as_object().is_some_and(|o| o.keys().all(|k| k == "text" || k == "thought"))
+            && p.as_object()
+                .is_some_and(|o| o.keys().all(|k| k == "text" || k == "thought"))
     };
-    if let Some(last) = parts.last_mut() {
-        if plain_text(last) && plain_text(&part) && last["thought"] == part["thought"] {
-            let merged = format!(
-                "{}{}",
-                last["text"].as_str().unwrap_or_default(),
-                part["text"].as_str().unwrap_or_default()
-            );
-            last["text"] = Value::String(merged);
-            return;
-        }
+    if let Some(last) = parts.last_mut()
+        && plain_text(last)
+        && plain_text(&part)
+        && last["thought"] == part["thought"]
+    {
+        let merged = format!(
+            "{}{}",
+            last["text"].as_str().unwrap_or_default(),
+            part["text"].as_str().unwrap_or_default()
+        );
+        last["text"] = Value::String(merged);
+        return;
     }
     parts.push(part);
 }
 
 fn assemble(parts: Vec<Value>, model: &str) -> Vec<ContentBlock> {
-    let meta = |raw: Value| Some(ProviderMeta { protocol: PROTOCOL.to_string(), model: model.to_string(), raw });
+    let meta = |raw: Value| {
+        Some(ProviderMeta {
+            protocol: PROTOCOL.to_string(),
+            model: model.to_string(),
+            raw,
+        })
+    };
     let mut content = Vec::new();
     for part in parts {
         if let Some(call) = part.get("functionCall") {
@@ -544,7 +586,10 @@ fn assemble(parts: Vec<Value>, model: &str) -> Vec<ContentBlock> {
                 _ => json!({}),
             };
             content.push(ContentBlock::ToolCall {
-                id: call["id"].as_str().map(str::to_string).unwrap_or_else(http::new_call_id),
+                id: call["id"]
+                    .as_str()
+                    .map(str::to_string)
+                    .unwrap_or_else(http::new_call_id),
                 name: call["name"].as_str().unwrap_or_default().to_string(),
                 input,
                 invalid_json: None,
@@ -560,7 +605,9 @@ fn assemble(parts: Vec<Value>, model: &str) -> Vec<ContentBlock> {
                 content.push(ContentBlock::Text { text, meta: None });
             }
         } else {
-            content.push(ContentBlock::Opaque { meta: meta(part).expect("meta is always built") });
+            content.push(ContentBlock::Opaque {
+                meta: meta(part).expect("meta is always built"),
+            });
         }
     }
     content
@@ -604,11 +651,17 @@ mod tests {
     fn thinking_config_follows_model_generation() {
         let p = provider();
         let hydrogen = p.build_body(&request("gemini-4-hydrogen", Effort::Xhigh));
-        assert_eq!(hydrogen["generationConfig"]["thinkingConfig"], json!({"includeThoughts": true, "thinkingLevel": "xhigh"}));
+        assert_eq!(
+            hydrogen["generationConfig"]["thinkingConfig"],
+            json!({"includeThoughts": true, "thinkingLevel": "xhigh"})
+        );
         let carbon = p.build_body(&request("gemini-4-carbon", Effort::Xhigh));
         assert_eq!(carbon["generationConfig"]["thinkingConfig"]["thinkingLevel"], "high");
         let legacy = p.build_body(&request("gemini-2.5-pro", Effort::High));
-        assert_eq!(legacy["generationConfig"]["thinkingConfig"], json!({"includeThoughts": true}));
+        assert_eq!(
+            legacy["generationConfig"]["thinkingConfig"],
+            json!({"includeThoughts": true})
+        );
         let other = p.build_body(&request("gemma-3-27b-it", Effort::High));
         assert!(other.get("generationConfig").is_none());
         assert!(hydrogen["generationConfig"].get("temperature").is_none());
@@ -619,7 +672,10 @@ mod tests {
     fn tools_use_json_schema_without_dollar_schema() {
         let body = provider().build_body(&request("gemini-4-hydrogen", Effort::High));
         let declaration = &body["tools"][0]["functionDeclarations"][0];
-        assert_eq!(declaration["parametersJsonSchema"], json!({"type": "object", "additionalProperties": false}));
+        assert_eq!(
+            declaration["parametersJsonSchema"],
+            json!({"type": "object", "additionalProperties": false})
+        );
         assert_eq!(body["systemInstruction"]["parts"][0]["text"], "sys");
     }
 
@@ -627,14 +683,32 @@ mod tests {
     fn replays_own_parts_verbatim_and_pairs_responses() {
         let signed_call = json!({"functionCall": {"id": "g1", "name": "read_file", "args": {"path": "a"}}, "thoughtSignature": "SIG"});
         let unsigned_call = json!({"functionCall": {"name": "read_file", "args": {"path": "b"}}});
-        let meta = |raw: &Value| Some(ProviderMeta { protocol: "gemini".into(), model: "m".into(), raw: raw.clone() });
+        let meta = |raw: &Value| {
+            Some(ProviderMeta {
+                protocol: "gemini".into(),
+                model: "m".into(),
+                raw: raw.clone(),
+            })
+        };
         let history = vec![
             Message::user_text("go"),
             Message {
                 role: Role::Assistant,
                 content: vec![
-                    ContentBlock::ToolCall { id: "g1".into(), name: "read_file".into(), input: json!({"path": "a"}), invalid_json: None, meta: meta(&signed_call) },
-                    ContentBlock::ToolCall { id: "call_local".into(), name: "read_file".into(), input: json!({"path": "b"}), invalid_json: None, meta: meta(&unsigned_call) },
+                    ContentBlock::ToolCall {
+                        id: "g1".into(),
+                        name: "read_file".into(),
+                        input: json!({"path": "a"}),
+                        invalid_json: None,
+                        meta: meta(&signed_call),
+                    },
+                    ContentBlock::ToolCall {
+                        id: "call_local".into(),
+                        name: "read_file".into(),
+                        input: json!({"path": "b"}),
+                        invalid_json: None,
+                        meta: meta(&unsigned_call),
+                    },
                 ],
             },
             Message {
@@ -668,10 +742,16 @@ mod tests {
         };
         let history = vec![
             Message::user_text("go"),
-            Message { role: Role::Assistant, content: vec![ContentBlock::text("ok"), call("toolu_1"), call("toolu_2")] },
+            Message {
+                role: Role::Assistant,
+                content: vec![ContentBlock::text("ok"), call("toolu_1"), call("toolu_2")],
+            },
             Message {
                 role: Role::User,
-                content: vec![ContentBlock::tool_result("toolu_1", "x", false), ContentBlock::tool_result("toolu_2", "y", false)],
+                content: vec![
+                    ContentBlock::tool_result("toolu_1", "x", false),
+                    ContentBlock::tool_result("toolu_2", "y", false),
+                ],
             },
         ];
         let contents = convert_messages(&history);
@@ -691,7 +771,11 @@ mod tests {
         push_part(&mut parts, json!({"text": "", "thoughtSignature": "S"}));
         assert_eq!(
             parts,
-            vec![json!({"text": "Plan", "thought": true}), json!({"text": "Hello"}), json!({"text": "", "thoughtSignature": "S"})]
+            vec![
+                json!({"text": "Plan", "thought": true}),
+                json!({"text": "Hello"}),
+                json!({"text": "", "thoughtSignature": "S"})
+            ]
         );
         let content = assemble(parts, "m");
         assert!(matches!(&content[0], ContentBlock::Reasoning { text, .. } if text == "Plan"));
@@ -704,7 +788,13 @@ mod tests {
         let body = json!({"error": {"code": 429, "message": "Quota exceeded", "status": "RESOURCE_EXHAUSTED", "details": [
             {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "34.5s"}
         ]}});
-        let failure = |json: Value| ApiFailure { status: 429, retry_after: None, should_retry: None, body: json.to_string(), json: Some(json) };
+        let failure = |json: Value| ApiFailure {
+            status: 429,
+            retry_after: None,
+            should_retry: None,
+            body: json.to_string(),
+            json: Some(json),
+        };
         let err = map_failure(failure(body), "google");
         assert!(err.is_retryable());
         assert_eq!(err.retry_after(), Some(Duration::from_millis(34_500)));

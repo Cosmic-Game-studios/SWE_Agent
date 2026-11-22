@@ -118,8 +118,14 @@ mod tests {
         assert_eq!(
             events,
             vec![
-                SseEvent { event: "ping".into(), data: "{\"a\":1}".into() },
-                SseEvent { event: "".into(), data: "[DONE]".into() },
+                SseEvent {
+                    event: "ping".into(),
+                    data: "{\"a\":1}".into()
+                },
+                SseEvent {
+                    event: "".into(),
+                    data: "[DONE]".into()
+                },
             ]
         );
     }
@@ -127,7 +133,13 @@ mod tests {
     #[test]
     fn joins_multi_line_data_and_skips_comments() {
         let events = decode_all(&[b": OPENROUTER PROCESSING\n\ndata: one\ndata: two\n\n"]);
-        assert_eq!(events, vec![SseEvent { event: "".into(), data: "one\ntwo".into() }]);
+        assert_eq!(
+            events,
+            vec![SseEvent {
+                event: "".into(),
+                data: "one\ntwo".into()
+            }]
+        );
     }
 
     #[test]
@@ -146,7 +158,13 @@ mod tests {
     #[test]
     fn flushes_unterminated_final_event() {
         let events = decode_all(&[b"data: last"]);
-        assert_eq!(events, vec![SseEvent { event: "".into(), data: "last".into() }]);
+        assert_eq!(
+            events,
+            vec![SseEvent {
+                event: "".into(),
+                data: "last".into()
+            }]
+        );
     }
 
     #[test]

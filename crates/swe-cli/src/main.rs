@@ -14,7 +14,11 @@ use swe_protocol::{
 use swe_server::ServeOptions;
 
 #[derive(Parser)]
-#[command(name = "swe", version, about = "SWE Agent: an autonomous software engineer for any model")]
+#[command(
+    name = "swe",
+    version,
+    about = "SWE Agent: an autonomous software engineer for any model"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -29,9 +33,7 @@ enum Command {
     /// List providers and where their API keys come from.
     Providers,
     /// List the models a provider offers.
-    Models {
-        provider: String,
-    },
+    Models { provider: String },
     /// Store or remove an API key.
     Key {
         #[command(subcommand)]
@@ -65,7 +67,13 @@ struct ServeArgs {
 
 impl Default for ServeArgs {
     fn default() -> Self {
-        ServeArgs { host: IpAddr::from([127, 0, 0, 1]), port: 4477, token: None, no_open: false, dev_origin: None }
+        ServeArgs {
+            host: IpAddr::from([127, 0, 0, 1]),
+            port: 4477,
+            token: None,
+            no_open: false,
+            dev_origin: None,
+        }
     }
 }
 
@@ -111,9 +119,7 @@ enum KeyAction {
 
 fn main() -> ExitCode {
     tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_env("SWE_AGENT_LOG").unwrap_or_else(|_| "warn".into()),
-        )
+        .with_env_filter(tracing_subscriber::EnvFilter::try_from_env("SWE_AGENT_LOG").unwrap_or_else(|_| "warn".into()))
         .with_writer(std::io::stderr)
         .init();
     let cli = Cli::parse();
@@ -167,7 +173,10 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Models { provider } => {
             let models = manager.registry().models(&provider, true).await?;
             for model in models {
-                let window = model.context_window.map(|n| format!("{}k context", n / 1000)).unwrap_or_default();
+                let window = model
+                    .context_window
+                    .map(|n| format!("{}k context", n / 1000))
+                    .unwrap_or_default();
                 println!("{:<44} {window}", model.id);
             }
         }
@@ -187,7 +196,10 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 };
                 anyhow::ensure!(!key.trim().is_empty(), "no key given");
                 manager.registry().set_key(&provider, Some(&key))?;
-                println!("Stored the key for {provider} in {}", manager.paths().credentials_file().display());
+                println!(
+                    "Stored the key for {provider} in {}",
+                    manager.paths().credentials_file().display()
+                );
             }
             KeyAction::Remove { provider } => {
                 manager.registry().set_key(&provider, None)?;
@@ -295,12 +307,21 @@ async fn run_task(manager: SessionManager, args: RunArgs) -> anyhow::Result<Exit
         let indent = if root { "" } else { "  " };
         match &event.kind {
             EventKind::TurnFinished { outcome, .. } => break *outcome,
-            EventKind::ApprovalRequested { request_id, name, summary, reason, always_label, .. } => {
+            EventKind::ApprovalRequested {
+                request_id,
+                name,
+                summary,
+                reason,
+                always_label,
+                ..
+            } => {
                 let decision = if interactive {
                     prompt_for_approval(name, summary, reason, always_label.as_deref())
                 } else {
                     if !args.json {
-                        eprintln!("{indent}! {name}: {summary} needs approval and was denied (not interactive; use --mode auto-edit or full-auto)");
+                        eprintln!(
+                            "{indent}! {name}: {summary} needs approval and was denied (not interactive; use --mode auto-edit or full-auto)"
+                        );
                     }
                     ApprovalDecision::Deny
                 };
@@ -326,11 +347,20 @@ async fn run_task(manager: SessionManager, args: RunArgs) -> anyhow::Result<Exit
                 streamed_text = false;
             }
             EventKind::ToolStarted { name, summary, .. } => eprintln!("{indent}> {name} {summary}"),
-            EventKind::ToolFinished { name, output, is_error: true, .. } => {
+            EventKind::ToolFinished {
+                name,
+                output,
+                is_error: true,
+                ..
+            } => {
                 let first = output.lines().next().unwrap_or_default();
                 eprintln!("{indent}x {name}: {first}");
             }
-            EventKind::AgentSpawned { description, agent_type, .. } => eprintln!("+ sub-agent ({agent_type}): {description}"),
+            EventKind::AgentSpawned {
+                description,
+                agent_type,
+                ..
+            } => eprintln!("+ sub-agent ({agent_type}): {description}"),
             EventKind::Compacted { .. } => eprintln!("~ conversation summarised to free context"),
             EventKind::Retrying { attempt, message, .. } => eprintln!("~ retry {attempt}: {message}"),
             EventKind::Notice { text } => eprintln!("{indent}i {text}"),

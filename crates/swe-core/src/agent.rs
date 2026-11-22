@@ -85,7 +85,9 @@ struct Call {
 
 enum RequestError {
     /// The user stopped the turn; `partial` is the text streamed so far.
-    Cancelled { partial: String },
+    Cancelled {
+        partial: String,
+    },
     Failed(String),
 }
 
@@ -144,7 +146,12 @@ pub(crate) async fn run_agent(
                 }
                 Err(compaction::CompactError::Failed(message)) => {
                     let message = format!("Could not summarise the conversation to free context: {message}");
-                    session.emit(&spec.agent_id, EventKind::Error { message: message.clone() });
+                    session.emit(
+                        &spec.agent_id,
+                        EventKind::Error {
+                            message: message.clone(),
+                        },
+                    );
                     return finish(TurnOutcome::Error, usage, final_text, Some(message));
                 }
             }
@@ -171,7 +178,12 @@ pub(crate) async fn run_agent(
                 return finish(TurnOutcome::Cancelled, usage, final_text, None);
             }
             Err(RequestError::Failed(message)) => {
-                session.emit(&spec.agent_id, EventKind::Error { message: message.clone() });
+                session.emit(
+                    &spec.agent_id,
+                    EventKind::Error {
+                        message: message.clone(),
+                    },
+                );
                 return finish(TurnOutcome::Error, usage, final_text, Some(message));
             }
         };
@@ -210,7 +222,12 @@ pub(crate) async fn run_agent(
             StopReason::Refusal => {
                 // A refusal can cut a tool call off mid-input; never run this turn's tools.
                 if !calls.is_empty() {
-                    history.push(reject_all(session, spec, &calls, "Not executed: the response was declined by the provider."));
+                    history.push(reject_all(
+                        session,
+                        spec,
+                        &calls,
+                        "Not executed: the response was declined by the provider.",
+                    ));
                 }
                 save(history);
                 return finish(TurnOutcome::Refusal, usage, final_text, None);
@@ -219,9 +236,19 @@ pub(crate) async fn run_agent(
                 continuations += 1;
                 if continuations > MAX_CONTINUATIONS {
                     let message = "The model kept hitting its output limit; stopping.".to_string();
-                    session.emit(&spec.agent_id, EventKind::Error { message: message.clone() });
+                    session.emit(
+                        &spec.agent_id,
+                        EventKind::Error {
+                            message: message.clone(),
+                        },
+                    );
                     if !calls.is_empty() {
-                        history.push(reject_all(session, spec, &calls, "Not executed: the response was cut off."));
+                        history.push(reject_all(
+                            session,
+                            spec,
+                            &calls,
+                            "Not executed: the response was cut off.",
+                        ));
                     }
                     save(history);
                     return finish(TurnOutcome::Error, usage, final_text, Some(message));
@@ -258,7 +285,10 @@ pub(crate) async fn run_agent(
         }
 
         let results = execute_tools(env, spec, &calls).await;
-        history.push(Message { role: Role::User, content: results });
+        history.push(Message {
+            role: Role::User,
+            content: results,
+        });
         save(history);
     }
 }
@@ -271,14 +301,23 @@ fn inject_steering(session: &Session, history: &mut Vec<Message>) {
     }
     let mut blocks = Vec::new();
     for input in pending {
-        session.emit(ROOT_AGENT, EventKind::UserMessage { text: input.text.clone(), images: input.images.clone() });
+        session.emit(
+            ROOT_AGENT,
+            EventKind::UserMessage {
+                text: input.text.clone(),
+                images: input.images.clone(),
+            },
+        );
         blocks.extend(input.into_blocks());
     }
     // The newest user message has not been sent yet, so extending it keeps
     // the roles alternating without rewriting anything the model has seen.
     match history.last_mut() {
         Some(last) if last.role == Role::User => last.content.extend(blocks),
-        _ => history.push(Message { role: Role::User, content: blocks }),
+        _ => history.push(Message {
+            role: Role::User,
+            content: blocks,
+        }),
     }
 }
 
@@ -291,7 +330,10 @@ fn reject_all(session: &Session, spec: &AgentSpec, calls: &[Call], reason: &str)
             ContentBlock::tool_result(&call.id, reason, true)
         })
         .collect();
-    Message { role: Role::User, content }
+    Message {
+        role: Role::User,
+        content,
+    }
 }
 
 fn report_rejection(session: &Session, spec: &AgentSpec, call: &Call, reason: &str) {
@@ -362,7 +404,9 @@ async fn request(
                         return Err(RequestError::Cancelled { partial: String::new() });
                     }
                     Err(compaction::CompactError::Failed(message)) => {
-                        return Err(RequestError::Failed(format!("{error} (and summarising failed: {message})")));
+                        return Err(RequestError::Failed(format!(
+                            "{error} (and summarising failed: {message})"
+                        )));
                     }
                 }
             }
@@ -371,7 +415,9 @@ async fn request(
             LlmError::ReasoningRejected(_) if !stripped => {
                 stripped = true;
                 for message in history.iter_mut() {
-                    message.content.retain(|block| !matches!(block, ContentBlock::Reasoning { .. }));
+                    message
+                        .content
+                        .retain(|block| !matches!(block, ContentBlock::Reasoning { .. }));
                 }
                 history.retain(|message| !message.content.is_empty());
                 session.emit(
@@ -395,7 +441,11 @@ async fn request(
                 };
                 session.emit(
                     &spec.agent_id,
-                    EventKind::Retrying { attempt, delay_ms: delay.as_millis() as u64, message: error.to_string() },
+                    EventKind::Retrying {
+                        attempt,
+                        delay_ms: delay.as_millis() as u64,
+                        message: error.to_string(),
+                    },
                 );
                 tokio::select! {
                     _ = tokio::time::sleep(delay) => {}
@@ -409,7 +459,9 @@ async fn request(
 
 /// Exponential backoff with jitter: 2s, 4s, 8s ... capped at 60s.
 fn backoff(attempt: u32) -> Duration {
-    let base = 2_000u64.saturating_mul(1 << attempt.saturating_sub(1).min(5)).min(60_000);
+    let base = 2_000u64
+        .saturating_mul(1 << attempt.saturating_sub(1).min(5))
+        .min(60_000);
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.subsec_nanos() as u64)
@@ -449,7 +501,11 @@ async fn stream_once(env: &Env, spec: &AgentSpec, chat: ChatRequest) -> Result<C
             Some(Ok(StreamEvent::ToolCallStart { index, id, name })) => {
                 session.emit(
                     &spec.agent_id,
-                    EventKind::ToolCallStreaming { tool_call_id: id.clone(), name: name.clone(), input_chars: 0 },
+                    EventKind::ToolCallStreaming {
+                        tool_call_id: id.clone(),
+                        name: name.clone(),
+                        input_chars: 0,
+                    },
                 );
                 calls.insert(index, (id, name, 0, 0));
             }
@@ -473,7 +529,9 @@ async fn stream_once(env: &Env, spec: &AgentSpec, chat: ChatRequest) -> Result<C
             Some(Ok(StreamEvent::Completed(completion))) => return Ok(completion),
             Some(Err(error)) => return Err(StreamFailure::Llm(error)),
             None => {
-                return Err(StreamFailure::Llm(LlmError::Stream("the response ended without completing".into())));
+                return Err(StreamFailure::Llm(LlmError::Stream(
+                    "the response ended without completing".into(),
+                )));
             }
         }
     }
@@ -515,7 +573,9 @@ async fn execute_tools(env: &Env, spec: &AgentSpec, calls: &[Call]) -> Vec<Conte
                     end += 1;
                 }
                 let batch = (index..end).map(|i| {
-                    let Planned::Run(tool) = &plans[i] else { unreachable!("range holds runnable calls") };
+                    let Planned::Run(tool) = &plans[i] else {
+                        unreachable!("range holds runnable calls")
+                    };
                     run_call(env, spec, &calls[i], tool.clone())
                 });
                 for (offset, output) in join_all(batch).await.into_iter().enumerate() {
@@ -579,14 +639,23 @@ async fn plan_call(env: &Env, spec: &AgentSpec, call: &Call) -> Planned {
                 )
                 .await;
             match outcome {
-                ApprovalOutcome::Decided { decision: ApprovalDecision::Allow, .. } => Planned::Run(tool),
-                ApprovalOutcome::Decided { decision: ApprovalDecision::AllowAlways, .. } => {
+                ApprovalOutcome::Decided {
+                    decision: ApprovalDecision::Allow,
+                    ..
+                } => Planned::Run(tool),
+                ApprovalOutcome::Decided {
+                    decision: ApprovalDecision::AllowAlways,
+                    ..
+                } => {
                     if let Some(rule) = always {
                         session.add_rule(rule);
                     }
                     Planned::Run(tool)
                 }
-                ApprovalOutcome::Decided { decision: ApprovalDecision::Deny, feedback } => {
+                ApprovalOutcome::Decided {
+                    decision: ApprovalDecision::Deny,
+                    feedback,
+                } => {
                     let mut message = "The user declined this action. Do not try to achieve it another way \
                                        without asking."
                         .to_string();
@@ -626,7 +695,10 @@ async fn run_call(env: &Env, spec: &AgentSpec, call: &Call, tool: Arc<dyn Tool>)
             output: OutputSink::new(move |chunk| {
                 sink_session.emit(
                     &sink_agent,
-                    EventKind::ToolOutputDelta { tool_call_id: sink_call.clone(), chunk },
+                    EventKind::ToolOutputDelta {
+                        tool_call_id: sink_call.clone(),
+                        chunk,
+                    },
                 );
             }),
             shell: session.shell(),
@@ -657,7 +729,10 @@ impl UserInput {
             blocks.push(ContentBlock::text(self.text));
         }
         for image in self.images {
-            blocks.push(ContentBlock::Image { media_type: image.media_type, data: image.data });
+            blocks.push(ContentBlock::Image {
+                media_type: image.media_type,
+                data: image.data,
+            });
         }
         blocks
     }
@@ -672,7 +747,10 @@ mod tests {
         for attempt in 1..=12 {
             let delay = backoff(attempt).as_millis() as u64;
             let base = (2_000u64 << (attempt - 1).min(5)).min(60_000);
-            assert!(delay >= base - base / 5 && delay <= base + base / 5, "attempt {attempt}: {delay}ms");
+            assert!(
+                delay >= base - base / 5 && delay <= base + base / 5,
+                "attempt {attempt}: {delay}ms"
+            );
         }
         assert!(backoff(12) <= Duration::from_secs(72));
     }

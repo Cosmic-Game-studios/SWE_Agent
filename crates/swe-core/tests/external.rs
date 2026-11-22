@@ -22,7 +22,10 @@ async fn turn(manager: &SessionManager, id: &str, text: &str) -> Vec<Event> {
     manager.send_message(id, UserInput::text(text)).unwrap();
     let mut events = Vec::new();
     loop {
-        let event = tokio::time::timeout(Duration::from_secs(20), rx.recv()).await.expect("timed out").unwrap();
+        let event = tokio::time::timeout(Duration::from_secs(20), rx.recv())
+            .await
+            .expect("timed out")
+            .unwrap();
         let done = matches!(event.kind, EventKind::TurnFinished { .. });
         events.push(event);
         if done {
@@ -32,18 +35,33 @@ async fn turn(manager: &SessionManager, id: &str, text: &str) -> Vec<Event> {
 }
 
 fn outcome(events: &[Event]) -> TurnOutcome {
-    events.iter().find_map(|e| match &e.kind { EventKind::TurnFinished { outcome, .. } => Some(*outcome), _ => None }).unwrap()
+    events
+        .iter()
+        .find_map(|e| match &e.kind {
+            EventKind::TurnFinished { outcome, .. } => Some(*outcome),
+            _ => None,
+        })
+        .unwrap()
 }
 
 fn texts(events: &[Event]) -> Vec<String> {
     events
         .iter()
-        .filter_map(|e| match &e.kind { EventKind::AssistantMessage { message, .. } => Some(message.text()), _ => None })
+        .filter_map(|e| match &e.kind {
+            EventKind::AssistantMessage { message, .. } => Some(message.text()),
+            _ => None,
+        })
         .collect()
 }
 
 fn errors(events: &[Event]) -> Vec<String> {
-    events.iter().filter_map(|e| match &e.kind { EventKind::Error { message } => Some(message.clone()), _ => None }).collect()
+    events
+        .iter()
+        .filter_map(|e| match &e.kind {
+            EventKind::Error { message } => Some(message.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 // One test function: the binaries are selected through process-wide
@@ -87,10 +105,20 @@ echo '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-4
     assert!(said.contains("--output-format stream-json"), "{said}");
     assert!(said.contains("--permission-mode acceptEdits"), "{said}");
     assert!(!said.contains("--resume"), "{said}");
-    assert!(said.contains(&format!("cwd={}", workspace.path().canonicalize().unwrap().display())), "{said}");
+    assert!(
+        said.contains(&format!("cwd={}", workspace.path().canonicalize().unwrap().display())),
+        "{said}"
+    );
     let meta = manager.get(&id).unwrap().meta();
     assert_eq!(meta.external_session_id.as_deref(), Some("sess-42"));
-    assert_eq!((meta.usage.input_tokens, meta.usage.output_tokens, meta.usage.cache_read_tokens), (100, 5, 90));
+    assert_eq!(
+        (
+            meta.usage.input_tokens,
+            meta.usage.output_tokens,
+            meta.usage.cache_read_tokens
+        ),
+        (100, 5, 90)
+    );
     assert_eq!(meta.status, SessionStatus::Idle);
     assert_eq!(meta.provider, "claude-cli");
 
@@ -101,7 +129,11 @@ echo '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-4
     // Ask mode cannot be honoured interactively; the user is told.
     let ask = create(Engine::ClaudeCli, PermissionMode::Ask);
     let events = turn(&manager, &ask, "hello").await;
-    assert!(events.iter().any(|e| matches!(&e.kind, EventKind::Notice { text } if text.contains("cannot ask for approval"))));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(&e.kind, EventKind::Notice { text } if text.contains("cannot ask for approval")))
+    );
     assert!(texts(&events).join("\n").contains("--permission-mode default"));
 
     // --- codex: thread id, a command, cumulative usage.
@@ -121,7 +153,12 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1000,"cached_input_tokens
     let events = turn(&manager, &id, "list files").await;
     assert_eq!(outcome(&events), TurnOutcome::Completed);
     let said = texts(&events).join("\n");
-    assert!(said.contains("prompt=list files") && said.contains("exec --json") && said.contains("--sandbox danger-full-access"), "{said}");
+    assert!(
+        said.contains("prompt=list files")
+            && said.contains("exec --json")
+            && said.contains("--sandbox danger-full-access"),
+        "{said}"
+    );
     assert!(events.iter().any(|e| matches!(&e.kind, EventKind::ToolFinished { name, output, is_error: false, .. } if name == "bash" && output == "README.md\n")));
     let events = turn(&manager, &id, "more").await;
     assert!(texts(&events).join("\n").contains("resume thread-7"));
@@ -129,13 +166,20 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1000,"cached_input_tokens
     assert_eq!(manager.get(&id).unwrap().meta().usage.input_tokens, 1000);
 
     // --- a CLI that fails before producing anything.
-    let broken = script(bin.path(), "fake-broken", "cat > /dev/null\necho 'Not logged in' >&2\nexit 3");
+    let broken = script(
+        bin.path(),
+        "fake-broken",
+        "cat > /dev/null\necho 'Not logged in' >&2\nexit 3",
+    );
     unsafe { std::env::set_var("SWE_AGENT_CLAUDE_BIN", &broken) };
     let id = create(Engine::ClaudeCli, PermissionMode::AutoEdit);
     let events = turn(&manager, &id, "hello").await;
     assert_eq!(outcome(&events), TurnOutcome::Error);
     let message = errors(&events).join("\n");
-    assert!(message.contains("exited with code 3") && message.contains("Not logged in"), "{message}");
+    assert!(
+        message.contains("exited with code 3") && message.contains("Not logged in"),
+        "{message}"
+    );
     assert_eq!(manager.get(&id).unwrap().meta().status, SessionStatus::Error);
 
     // --- cancelling kills the process.
@@ -149,7 +193,10 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1000,"cached_input_tokens
     let started = std::time::Instant::now();
     manager.cancel(&id).unwrap();
     loop {
-        let event = tokio::time::timeout(Duration::from_secs(10), rx.recv()).await.expect("timed out").unwrap();
+        let event = tokio::time::timeout(Duration::from_secs(10), rx.recv())
+            .await
+            .expect("timed out")
+            .unwrap();
         if let EventKind::TurnFinished { outcome, .. } = event.kind {
             assert_eq!(outcome, TurnOutcome::Cancelled);
             break;
@@ -162,6 +209,18 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1000,"cached_input_tokens
     let id = create(Engine::ClaudeCli, PermissionMode::AutoEdit);
     let events = turn(&manager, &id, "hello").await;
     assert!(errors(&events).join("\n").contains("was not found on PATH"));
-    assert!(!swe_core::engines().iter().find(|e| e.id == Engine::ClaudeCli).unwrap().installed);
-    assert!(swe_core::engines().iter().find(|e| e.id == Engine::CodexCli).unwrap().installed);
+    assert!(
+        !swe_core::engines()
+            .iter()
+            .find(|e| e.id == Engine::ClaudeCli)
+            .unwrap()
+            .installed
+    );
+    assert!(
+        swe_core::engines()
+            .iter()
+            .find(|e| e.id == Engine::CodexCli)
+            .unwrap()
+            .installed
+    );
 }

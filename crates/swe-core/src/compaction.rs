@@ -60,7 +60,13 @@ pub(crate) async fn compact(
     // A user message that has not been answered yet is not history: keep it
     // verbatim after the summary instead of paraphrasing the request.
     let pending = match history.last() {
-        Some(last) if last.role == Role::User && !last.content.iter().any(|b| matches!(b, ContentBlock::ToolResult { .. })) => {
+        Some(last)
+            if last.role == Role::User
+                && !last
+                    .content
+                    .iter()
+                    .any(|b| matches!(b, ContentBlock::ToolResult { .. })) =>
+        {
             history.pop()
         }
         _ => None,
@@ -71,7 +77,9 @@ pub(crate) async fn compact(
     let chat = ChatRequest {
         model: spec.model.clone(),
         system: SUMMARY_SYSTEM.to_string(),
-        messages: vec![Message::user_text(format!("<transcript>\n{transcript}\n</transcript>\n\n{SUMMARY_REQUEST}"))],
+        messages: vec![Message::user_text(format!(
+            "<transcript>\n{transcript}\n</transcript>\n\n{SUMMARY_REQUEST}"
+        ))],
         tools: Vec::new(),
         max_output_tokens: None,
         effort: Effort::Medium,
@@ -144,9 +152,18 @@ pub(crate) async fn compact(
         )),
     }
     history.clear();
-    history.push(Message { role: Role::User, content });
+    history.push(Message {
+        role: Role::User,
+        content,
+    });
 
-    session.emit(&spec.agent_id, EventKind::Compacted { summary: summary.trim().to_string(), tokens_before });
+    session.emit(
+        &spec.agent_id,
+        EventKind::Compacted {
+            summary: summary.trim().to_string(),
+            tokens_before,
+        },
+    );
     Ok(usage)
 }
 
@@ -186,7 +203,10 @@ fn render_transcript(history: &[Message]) -> String {
                     out.push_str(&format!("[{speaker}]\n{}\n\n", text.trim()));
                 }
                 ContentBlock::ToolCall { name, input, .. } => {
-                    out.push_str(&format!("[TOOL CALL {name}]\n{}\n\n", shorten(&input.to_string(), MAX_INPUT_CHARS)));
+                    out.push_str(&format!(
+                        "[TOOL CALL {name}]\n{}\n\n",
+                        shorten(&input.to_string(), MAX_INPUT_CHARS)
+                    ));
                 }
                 ContentBlock::ToolResult { content, is_error, .. } => {
                     let label = if *is_error { "TOOL ERROR" } else { "TOOL RESULT" };
@@ -239,7 +259,10 @@ mod tests {
             Message {
                 role: Role::Assistant,
                 content: vec![
-                    ContentBlock::Reasoning { text: "secret thoughts".into(), meta: None },
+                    ContentBlock::Reasoning {
+                        text: "secret thoughts".into(),
+                        meta: None,
+                    },
                     ContentBlock::text("Looking."),
                     ContentBlock::ToolCall {
                         id: "1".into(),
@@ -250,7 +273,10 @@ mod tests {
                     },
                 ],
             },
-            Message { role: Role::User, content: vec![ContentBlock::tool_result("1", "fn main() {}", false)] },
+            Message {
+                role: Role::User,
+                content: vec![ContentBlock::tool_result("1", "fn main() {}", false)],
+            },
         ];
         let transcript = render_transcript(&history);
         assert_eq!(

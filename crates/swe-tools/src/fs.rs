@@ -25,7 +25,9 @@ async fn read_text(path: &Path, shown: &str) -> Result<String, ToolOutput> {
         Err(err) => return Err(ToolOutput::error(format!("Cannot access {shown}: {err}"))),
     };
     if metadata.is_dir() {
-        return Err(ToolOutput::error(format!("{shown} is a directory; use list_dir to see its entries.")));
+        return Err(ToolOutput::error(format!(
+            "{shown} is a directory; use list_dir to see its entries."
+        )));
     }
     if metadata.len() > MAX_READ_BYTES {
         return Err(ToolOutput::error(format!(
@@ -36,8 +38,11 @@ async fn read_text(path: &Path, shown: &str) -> Result<String, ToolOutput> {
     let bytes = tokio::fs::read(path)
         .await
         .map_err(|err| ToolOutput::error(format!("Cannot read {shown}: {err}")))?;
-    String::from_utf8(bytes)
-        .map_err(|_| ToolOutput::error(format!("{shown} is not UTF-8 text (binary file?). Use bash to inspect it.")))
+    String::from_utf8(bytes).map_err(|_| {
+        ToolOutput::error(format!(
+            "{shown} is not UTF-8 text (binary file?). Use bash to inspect it."
+        ))
+    })
 }
 
 pub struct ReadFile;
@@ -183,11 +188,15 @@ impl Tool for WriteFile {
         let existed = path.exists();
         // A previous version that is not text is simply replaced; the diff
         // then shows the new content as added.
-        let before = if existed { tokio::fs::read_to_string(&path).await.unwrap_or_default() } else { String::new() };
-        if let Some(parent) = path.parent() {
-            if let Err(err) = tokio::fs::create_dir_all(parent).await {
-                return ToolOutput::error(format!("Cannot create directory {}: {err}", parent.display()));
-            }
+        let before = if existed {
+            tokio::fs::read_to_string(&path).await.unwrap_or_default()
+        } else {
+            String::new()
+        };
+        if let Some(parent) = path.parent()
+            && let Err(err) = tokio::fs::create_dir_all(parent).await
+        {
+            return ToolOutput::error(format!("Cannot create directory {}: {err}", parent.display()));
         }
         if let Err(err) = tokio::fs::write(&path, &args.content).await {
             return ToolOutput::error(format!("Cannot write {shown}: {err}"));
@@ -300,7 +309,11 @@ impl Tool for EditFile {
                  unique, or set replace_all to true."
             ));
         }
-        let after = if args.replace_all { before.replace(&old, &new) } else { before.replacen(&old, &new, 1) };
+        let after = if args.replace_all {
+            before.replace(&old, &new)
+        } else {
+            before.replacen(&old, &new, 1)
+        };
         if let Err(err) = tokio::fs::write(&path, &after).await {
             return ToolOutput::error(format!("Cannot write {shown}: {err}"));
         }
@@ -357,7 +370,11 @@ impl Tool for ListDir {
 
     fn summarize(&self, input: &Value) -> String {
         let path = arg_str(input, "path");
-        if path.is_empty() { ".".to_string() } else { path.to_string() }
+        if path.is_empty() {
+            ".".to_string()
+        } else {
+            path.to_string()
+        }
     }
 
     fn paths(&self, input: &Value) -> Vec<String> {
@@ -428,7 +445,9 @@ mod tests {
         assert!(!all.is_error);
         assert_eq!(all.content, "1\tone\n2\ttwo\n3\tthree\n4\tfour\n");
 
-        let page = ReadFile.run(json!({"path": "a.txt", "offset": 2, "limit": 2}), &ctx).await;
+        let page = ReadFile
+            .run(json!({"path": "a.txt", "offset": 2, "limit": 2}), &ctx)
+            .await;
         assert!(page.content.starts_with("2\ttwo\n3\tthree\n"));
         assert!(page.content.contains("Showing lines 2-3 of 4. Use offset=4"));
 
@@ -441,25 +460,75 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("bin"), [0u8, 159, 146, 150]).unwrap();
         let ctx = ctx(&dir);
-        assert!(ReadFile.run(json!({"path": "nope"}), &ctx).await.content.contains("File not found"));
-        assert!(ReadFile.run(json!({"path": "bin"}), &ctx).await.content.contains("not UTF-8"));
-        assert!(ReadFile.run(json!({"path": "."}), &ctx).await.content.contains("is a directory"));
-        assert!(ReadFile.run(json!({"paht": "x"}), &ctx).await.content.contains("Invalid arguments"));
+        assert!(
+            ReadFile
+                .run(json!({"path": "nope"}), &ctx)
+                .await
+                .content
+                .contains("File not found")
+        );
+        assert!(
+            ReadFile
+                .run(json!({"path": "bin"}), &ctx)
+                .await
+                .content
+                .contains("not UTF-8")
+        );
+        assert!(
+            ReadFile
+                .run(json!({"path": "."}), &ctx)
+                .await
+                .content
+                .contains("is a directory")
+        );
+        assert!(
+            ReadFile
+                .run(json!({"paht": "x"}), &ctx)
+                .await
+                .content
+                .contains("Invalid arguments")
+        );
     }
 
     #[tokio::test]
     async fn write_creates_parents_and_reports_a_diff() {
         let dir = tempfile::tempdir().unwrap();
         let ctx = ctx(&dir);
-        let created = WriteFile.run(json!({"path": "src/deep/new.rs", "content": "fn main() {}\n"}), &ctx).await;
+        let created = WriteFile
+            .run(json!({"path": "src/deep/new.rs", "content": "fn main() {}\n"}), &ctx)
+            .await;
         assert!(!created.is_error, "{}", created.content);
         assert!(created.content.contains("Created src/deep/new.rs"));
-        assert!(matches!(created.display, Some(ToolDisplay::Diff { created: true, added: 1, removed: 0, .. })));
-        assert_eq!(fs::read_to_string(dir.path().join("src/deep/new.rs")).unwrap(), "fn main() {}\n");
+        assert!(matches!(
+            created.display,
+            Some(ToolDisplay::Diff {
+                created: true,
+                added: 1,
+                removed: 0,
+                ..
+            })
+        ));
+        assert_eq!(
+            fs::read_to_string(dir.path().join("src/deep/new.rs")).unwrap(),
+            "fn main() {}\n"
+        );
 
-        let replaced = WriteFile.run(json!({"path": "src/deep/new.rs", "content": "fn main() { run() }\n"}), &ctx).await;
+        let replaced = WriteFile
+            .run(
+                json!({"path": "src/deep/new.rs", "content": "fn main() { run() }\n"}),
+                &ctx,
+            )
+            .await;
         assert!(replaced.content.contains("Overwrote"));
-        assert!(matches!(replaced.display, Some(ToolDisplay::Diff { created: false, added: 1, removed: 1, .. })));
+        assert!(matches!(
+            replaced.display,
+            Some(ToolDisplay::Diff {
+                created: false,
+                added: 1,
+                removed: 1,
+                ..
+            })
+        ));
     }
 
     #[tokio::test]
@@ -469,20 +538,39 @@ mod tests {
         fs::write(&file, "let a = 1;\nlet b = 1;\n").unwrap();
         let ctx = ctx(&dir);
 
-        let ambiguous = EditFile.run(json!({"path": "a.rs", "old_string": "= 1;", "new_string": "= 2;"}), &ctx).await;
+        let ambiguous = EditFile
+            .run(
+                json!({"path": "a.rs", "old_string": "= 1;", "new_string": "= 2;"}),
+                &ctx,
+            )
+            .await;
         assert!(ambiguous.is_error);
         assert!(ambiguous.content.contains("occurs 2 times"));
-        assert_eq!(fs::read_to_string(&file).unwrap(), "let a = 1;\nlet b = 1;\n", "file untouched on error");
+        assert_eq!(
+            fs::read_to_string(&file).unwrap(),
+            "let a = 1;\nlet b = 1;\n",
+            "file untouched on error"
+        );
 
-        let missing = EditFile.run(json!({"path": "a.rs", "old_string": "nope", "new_string": "x"}), &ctx).await;
+        let missing = EditFile
+            .run(json!({"path": "a.rs", "old_string": "nope", "new_string": "x"}), &ctx)
+            .await;
         assert!(missing.content.contains("not found"));
 
-        let unique = EditFile.run(json!({"path": "a.rs", "old_string": "let a = 1;", "new_string": "let a = 5;"}), &ctx).await;
+        let unique = EditFile
+            .run(
+                json!({"path": "a.rs", "old_string": "let a = 1;", "new_string": "let a = 5;"}),
+                &ctx,
+            )
+            .await;
         assert!(!unique.is_error, "{}", unique.content);
         assert_eq!(fs::read_to_string(&file).unwrap(), "let a = 5;\nlet b = 1;\n");
 
         let all = EditFile
-            .run(json!({"path": "a.rs", "old_string": "let", "new_string": "const", "replace_all": true}), &ctx)
+            .run(
+                json!({"path": "a.rs", "old_string": "let", "new_string": "const", "replace_all": true}),
+                &ctx,
+            )
             .await;
         assert!(all.content.contains("2 replacements"));
         assert_eq!(fs::read_to_string(&file).unwrap(), "const a = 5;\nconst b = 1;\n");
@@ -494,7 +582,10 @@ mod tests {
         let file = dir.path().join("win.txt");
         fs::write(&file, "first\r\nsecond\r\nthird\r\n").unwrap();
         let out = EditFile
-            .run(json!({"path": "win.txt", "old_string": "first\nsecond", "new_string": "1\n2"}), &ctx(&dir))
+            .run(
+                json!({"path": "win.txt", "old_string": "first\nsecond", "new_string": "1\n2"}),
+                &ctx(&dir),
+            )
             .await;
         assert!(!out.is_error, "{}", out.content);
         assert_eq!(fs::read_to_string(&file).unwrap(), "1\r\n2\r\nthird\r\n");

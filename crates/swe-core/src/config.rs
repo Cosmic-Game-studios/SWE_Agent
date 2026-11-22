@@ -193,7 +193,9 @@ pub const DEMO_PROVIDER: &str = "demo";
 #[serde(tag = "source", rename_all = "snake_case")]
 pub enum KeyStatus {
     /// Found in this environment variable.
-    Env { variable: String },
+    Env {
+        variable: String,
+    },
     /// Stored in `credentials.json`.
     Stored,
     /// The provider needs no key.
@@ -303,7 +305,11 @@ impl ProviderRegistry {
             definitions.insert(
                 id.clone(),
                 Definition {
-                    name: custom.name.clone().or_else(|| builtin.map(|b| b.name.clone())).unwrap_or_else(|| id.clone()),
+                    name: custom
+                        .name
+                        .clone()
+                        .or_else(|| builtin.map(|b| b.name.clone()))
+                        .unwrap_or_else(|| id.clone()),
                     protocol: custom.protocol,
                     base_url: custom.base_url.trim_end_matches('/').to_string(),
                     key_envs,
@@ -327,10 +333,15 @@ impl ProviderRegistry {
             return (None, KeyStatus::NotNeeded);
         }
         for variable in &definition.key_envs {
-            if let Ok(value) = std::env::var(variable) {
-                if !value.trim().is_empty() {
-                    return (Some(value.trim().to_string()), KeyStatus::Env { variable: variable.clone() });
-                }
+            if let Ok(value) = std::env::var(variable)
+                && !value.trim().is_empty()
+            {
+                return (
+                    Some(value.trim().to_string()),
+                    KeyStatus::Env {
+                        variable: variable.clone(),
+                    },
+                );
             }
         }
         match self.stored_keys.read().unwrap().get(id) {
@@ -423,25 +434,32 @@ impl ProviderRegistry {
 
     /// Models of a provider, cached for a few minutes.
     pub async fn models(&self, id: &str, refresh: bool) -> Result<Vec<ModelInfo>, LlmError> {
-        if !refresh {
-            if let Some(cached) = self.models.lock().unwrap().get(id) {
-                if cached.fetched.elapsed() < MODEL_CACHE_TTL {
-                    return Ok(cached.models.clone());
-                }
-            }
+        if !refresh
+            && let Some(cached) = self.models.lock().unwrap().get(id)
+            && cached.fetched.elapsed() < MODEL_CACHE_TTL
+        {
+            return Ok(cached.models.clone());
         }
         let models = self.get(id)?.list_models().await?;
-        self.models
-            .lock()
-            .unwrap()
-            .insert(id.to_string(), CachedModels { fetched: Instant::now(), models: models.clone() });
+        self.models.lock().unwrap().insert(
+            id.to_string(),
+            CachedModels {
+                fetched: Instant::now(),
+                models: models.clone(),
+            },
+        );
         Ok(models)
     }
 
     /// Limits of a model if its provider's listing has been fetched already.
     pub fn cached_model(&self, provider: &str, model: &str) -> Option<ModelInfo> {
         let models = self.models.lock().unwrap();
-        models.get(provider)?.models.iter().find(|info| info.id == model).cloned()
+        models
+            .get(provider)?
+            .models
+            .iter()
+            .find(|info| info.id == model)
+            .cloned()
     }
 }
 
@@ -500,7 +518,10 @@ no_key = true
         .unwrap();
         let config = Config::load(&paths).unwrap();
         assert_eq!(config.default_mode, PermissionMode::AutoEdit);
-        assert_eq!(config.compact_threshold_tokens, 200_000, "unset fields keep their defaults");
+        assert_eq!(
+            config.compact_threshold_tokens, 200_000,
+            "unset fields keep their defaults"
+        );
         config.save(&paths).unwrap();
         assert_eq!(Config::load(&paths).unwrap(), config);
 
@@ -518,7 +539,11 @@ no_key = true
         let paths = Paths::at(dir.path());
         let registry = ProviderRegistry::new(&paths, &Config::default());
         let ids: Vec<String> = registry.list().into_iter().map(|p| p.id).collect();
-        assert!(["anthropic", "google", "openai", "openrouter"].iter().all(|id| ids.contains(&id.to_string())));
+        assert!(
+            ["anthropic", "google", "openai", "openrouter"]
+                .iter()
+                .all(|id| ids.contains(&id.to_string()))
+        );
 
         // Not asserting on env-provided keys: the test machine may have some.
         let before = registry.list().into_iter().find(|p| p.id == "openrouter").unwrap().key;
@@ -527,13 +552,19 @@ no_key = true
         }
         registry.set_key("openrouter", Some("  sk-or-test  ")).unwrap();
         if before == KeyStatus::Missing {
-            assert_eq!(registry.list().into_iter().find(|p| p.id == "openrouter").unwrap().key, KeyStatus::Stored);
+            assert_eq!(
+                registry.list().into_iter().find(|p| p.id == "openrouter").unwrap().key,
+                KeyStatus::Stored
+            );
         }
         assert!(registry.get("openrouter").is_ok());
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(paths.credentials_file()).unwrap().permissions().mode();
+            let mode = std::fs::metadata(paths.credentials_file())
+                .unwrap()
+                .permissions()
+                .mode();
             assert_eq!(mode & 0o777, 0o600);
         }
 
@@ -541,7 +572,11 @@ no_key = true
         let reloaded = ProviderRegistry::new(&paths, &Config::default());
         assert!(reloaded.get("openrouter").is_ok());
         reloaded.set_key("openrouter", None).unwrap();
-        assert!(!std::fs::read_to_string(paths.credentials_file()).unwrap().contains("sk-or-test"));
+        assert!(
+            !std::fs::read_to_string(paths.credentials_file())
+                .unwrap()
+                .contains("sk-or-test")
+        );
         assert!(registry.set_key("nope", Some("x")).is_err());
     }
 }

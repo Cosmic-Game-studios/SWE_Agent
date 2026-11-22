@@ -10,9 +10,7 @@ use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use futures::StreamExt;
 use serde_json::{Value, json};
-use swe_llm::{
-    ChatRequest, Completion, LlmError, Protocol, Provider, ProviderSettings, StreamEvent, build_provider,
-};
+use swe_llm::{ChatRequest, Completion, LlmError, Protocol, Provider, ProviderSettings, StreamEvent, build_provider};
 use swe_protocol::{ContentBlock, Effort, Message, StopReason, ToolSpec, Usage};
 
 #[derive(Clone, Debug)]
@@ -33,11 +31,21 @@ struct Reply {
 
 impl Reply {
     fn sse(body: impl Into<String>) -> Self {
-        Reply { status: 200, content_type: "text/event-stream", body: body.into(), headers: vec![] }
+        Reply {
+            status: 200,
+            content_type: "text/event-stream",
+            body: body.into(),
+            headers: vec![],
+        }
     }
 
     fn json(status: u16, body: Value) -> Self {
-        Reply { status, content_type: "application/json", body: body.to_string(), headers: vec![] }
+        Reply {
+            status,
+            content_type: "application/json",
+            body: body.to_string(),
+            headers: vec![],
+        }
     }
 }
 
@@ -58,7 +66,10 @@ impl MockServer {
     /// `responder` gets each request and its zero-based sequence number.
     async fn start(responder: impl Fn(&Captured, usize) -> Reply + Send + Sync + 'static) -> Self {
         let requests = Arc::new(Mutex::new(Vec::new()));
-        let state = ServerState { requests: requests.clone(), responder: Arc::new(responder) };
+        let state = ServerState {
+            requests: requests.clone(),
+            responder: Arc::new(responder),
+        };
         let app = axum::Router::new().fallback(handle).with_state(state);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -88,7 +99,13 @@ impl MockServer {
     }
 }
 
-async fn handle(State(state): State<ServerState>, method: Method, uri: Uri, headers: HeaderMap, body: Bytes) -> Response {
+async fn handle(
+    State(state): State<ServerState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
     let captured = Captured {
         method: method.to_string(),
         path: uri.path().to_string(),
@@ -103,7 +120,9 @@ async fn handle(State(state): State<ServerState>, method: Method, uri: Uri, head
     };
     let reply = (state.responder)(&captured, sequence);
     let mut response = (StatusCode::from_u16(reply.status).unwrap(), reply.body).into_response();
-    response.headers_mut().insert("content-type", reply.content_type.parse().unwrap());
+    response
+        .headers_mut()
+        .insert("content-type", reply.content_type.parse().unwrap());
     for (name, value) in reply.headers {
         response.headers_mut().insert(name, value.parse().unwrap());
     }
@@ -140,7 +159,12 @@ fn request(model: &str) -> ChatRequest {
 
 /// Run a request to completion and return every stream item.
 async fn run(provider: &Arc<dyn Provider>, request: ChatRequest) -> Vec<Result<StreamEvent, LlmError>> {
-    provider.stream(request).await.expect("request accepted").collect().await
+    provider
+        .stream(request)
+        .await
+        .expect("request accepted")
+        .collect()
+        .await
 }
 
 fn completion(events: &[Result<StreamEvent, LlmError>]) -> Completion {
@@ -151,15 +175,33 @@ fn completion(events: &[Result<StreamEvent, LlmError>]) -> Completion {
 }
 
 fn text_of(events: &[Result<StreamEvent, LlmError>]) -> String {
-    events.iter().filter_map(|e| match e { Ok(StreamEvent::TextDelta(t)) => Some(t.as_str()), _ => None }).collect()
+    events
+        .iter()
+        .filter_map(|e| match e {
+            Ok(StreamEvent::TextDelta(t)) => Some(t.as_str()),
+            _ => None,
+        })
+        .collect()
 }
 
 fn reasoning_of(events: &[Result<StreamEvent, LlmError>]) -> String {
-    events.iter().filter_map(|e| match e { Ok(StreamEvent::ReasoningDelta(t)) => Some(t.as_str()), _ => None }).collect()
+    events
+        .iter()
+        .filter_map(|e| match e {
+            Ok(StreamEvent::ReasoningDelta(t)) => Some(t.as_str()),
+            _ => None,
+        })
+        .collect()
 }
 
 fn tool_arguments_of(events: &[Result<StreamEvent, LlmError>]) -> String {
-    events.iter().filter_map(|e| match e { Ok(StreamEvent::ToolCallDelta { fragment, .. }) => Some(fragment.as_str()), _ => None }).collect()
+    events
+        .iter()
+        .filter_map(|e| match e {
+            Ok(StreamEvent::ToolCallDelta { fragment, .. }) => Some(fragment.as_str()),
+            _ => None,
+        })
+        .collect()
 }
 
 fn tool_call(done: &Completion) -> (String, String, Value) {
@@ -171,22 +213,55 @@ fn tool_call(done: &Completion) -> (String, String, Value) {
 
 fn anthropic_stream() -> String {
     sse(&[
-        ("message_start", json!({"type": "message_start", "message": {"id": "msg_1", "type": "message", "role": "assistant", "model": "claude-opus-5-5", "content": [],
-            "usage": {"input_tokens": 10, "cache_creation_input_tokens": 100, "cache_read_input_tokens": 2000, "output_tokens": 1}}})),
-        ("content_block_start", json!({"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": "", "signature": ""}})),
-        ("content_block_delta", json!({"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "Need to read the file."}})),
-        ("content_block_delta", json!({"type": "content_block_delta", "index": 0, "delta": {"type": "signature_delta", "signature": "SIG123"}})),
+        (
+            "message_start",
+            json!({"type": "message_start", "message": {"id": "msg_1", "type": "message", "role": "assistant", "model": "claude-opus-5-5", "content": [],
+            "usage": {"input_tokens": 10, "cache_creation_input_tokens": 100, "cache_read_input_tokens": 2000, "output_tokens": 1}}}),
+        ),
+        (
+            "content_block_start",
+            json!({"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": "", "signature": ""}}),
+        ),
+        (
+            "content_block_delta",
+            json!({"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "Need to read the file."}}),
+        ),
+        (
+            "content_block_delta",
+            json!({"type": "content_block_delta", "index": 0, "delta": {"type": "signature_delta", "signature": "SIG123"}}),
+        ),
         ("content_block_stop", json!({"type": "content_block_stop", "index": 0})),
-        ("content_block_start", json!({"type": "content_block_start", "index": 1, "content_block": {"type": "text", "text": ""}})),
+        (
+            "content_block_start",
+            json!({"type": "content_block_start", "index": 1, "content_block": {"type": "text", "text": ""}}),
+        ),
         ("ping", json!({"type": "ping"})),
-        ("content_block_delta", json!({"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "Let me "}})),
-        ("content_block_delta", json!({"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "look."}})),
+        (
+            "content_block_delta",
+            json!({"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "Let me "}}),
+        ),
+        (
+            "content_block_delta",
+            json!({"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "look."}}),
+        ),
         ("content_block_stop", json!({"type": "content_block_stop", "index": 1})),
-        ("content_block_start", json!({"type": "content_block_start", "index": 2, "content_block": {"type": "tool_use", "id": "toolu_1", "name": "read_file", "input": {}}})),
-        ("content_block_delta", json!({"type": "content_block_delta", "index": 2, "delta": {"type": "input_json_delta", "partial_json": "{\"path\": \"src/"}})),
-        ("content_block_delta", json!({"type": "content_block_delta", "index": 2, "delta": {"type": "input_json_delta", "partial_json": "main.rs\"}"}})),
+        (
+            "content_block_start",
+            json!({"type": "content_block_start", "index": 2, "content_block": {"type": "tool_use", "id": "toolu_1", "name": "read_file", "input": {}}}),
+        ),
+        (
+            "content_block_delta",
+            json!({"type": "content_block_delta", "index": 2, "delta": {"type": "input_json_delta", "partial_json": "{\"path\": \"src/"}}),
+        ),
+        (
+            "content_block_delta",
+            json!({"type": "content_block_delta", "index": 2, "delta": {"type": "input_json_delta", "partial_json": "main.rs\"}"}}),
+        ),
         ("content_block_stop", json!({"type": "content_block_stop", "index": 2})),
-        ("message_delta", json!({"type": "message_delta", "delta": {"stop_reason": "tool_use", "stop_sequence": null}, "usage": {"output_tokens": 42}})),
+        (
+            "message_delta",
+            json!({"type": "message_delta", "delta": {"stop_reason": "tool_use", "stop_sequence": null}, "usage": {"output_tokens": 42}}),
+        ),
         ("message_stop", json!({"type": "message_stop"})),
     ])
 }
@@ -200,21 +275,35 @@ async fn anthropic_streams_thinking_text_and_tool_use() {
     assert_eq!(reasoning_of(&events), "Need to read the file.");
     assert_eq!(text_of(&events), "Let me look.");
     assert_eq!(tool_arguments_of(&events), "{\"path\": \"src/main.rs\"}");
-    assert!(events.iter().any(|e| matches!(e, Ok(StreamEvent::ToolCallStart { id, name, .. }) if id == "toolu_1" && name == "read_file")));
+    assert!(events.iter().any(
+        |e| matches!(e, Ok(StreamEvent::ToolCallStart { id, name, .. }) if id == "toolu_1" && name == "read_file")
+    ));
 
     let done = completion(&events);
     assert_eq!(done.stop_reason, StopReason::ToolUse);
     assert_eq!(done.model.as_deref(), Some("claude-opus-5-5"));
     assert_eq!(
         done.usage,
-        Usage { input_tokens: 2110, output_tokens: 42, cache_read_tokens: 2000, cache_write_tokens: 100, reasoning_tokens: 0 }
+        Usage {
+            input_tokens: 2110,
+            output_tokens: 42,
+            cache_read_tokens: 2000,
+            cache_write_tokens: 100,
+            reasoning_tokens: 0
+        }
     );
-    assert_eq!(tool_call(&done), ("toolu_1".into(), "read_file".into(), json!({"path": "src/main.rs"})));
+    assert_eq!(
+        tool_call(&done),
+        ("toolu_1".into(), "read_file".into(), json!({"path": "src/main.rs"}))
+    );
     match &done.message.content[0] {
         ContentBlock::Reasoning { text, meta: Some(meta) } => {
             assert_eq!(text, "Need to read the file.");
             assert_eq!(meta.protocol, "anthropic");
-            assert_eq!(meta.raw, json!({"type": "thinking", "thinking": "Need to read the file.", "signature": "SIG123"}));
+            assert_eq!(
+                meta.raw,
+                json!({"type": "thinking", "thinking": "Need to read the file.", "signature": "SIG123"})
+            );
         }
         other => panic!("expected reasoning first, got {other:?}"),
     }
@@ -224,7 +313,10 @@ async fn anthropic_streams_thinking_text_and_tool_use() {
     assert_eq!(sent.headers["x-api-key"], "secret-key");
     assert_eq!(sent.headers["anthropic-version"], "2026-10-21");
     assert_eq!(sent.headers["x-extra"], "1");
-    assert!(sent.headers.get("anthropic-beta").is_none(), "no beta header for gateways");
+    assert!(
+        sent.headers.get("anthropic-beta").is_none(),
+        "no beta header for gateways"
+    );
     assert_eq!(sent.body["model"], "claude-opus-5-5");
     assert_eq!(sent.body["stream"], true);
     assert_eq!(sent.body["thinking"]["type"], "adaptive");
@@ -247,7 +339,10 @@ async fn anthropic_second_turn_replays_thinking_verbatim() {
 
     let sent = &server.requests()[1].body["messages"];
     assert_eq!(sent[1]["role"], "assistant");
-    assert_eq!(sent[1]["content"][0], json!({"type": "thinking", "thinking": "Need to read the file.", "signature": "SIG123"}));
+    assert_eq!(
+        sent[1]["content"][0],
+        json!({"type": "thinking", "thinking": "Need to read the file.", "signature": "SIG123"})
+    );
     assert_eq!(sent[1]["content"][2]["type"], "tool_use");
     assert_eq!(sent[2]["content"][0]["type"], "tool_result");
     assert_eq!(sent[2]["content"][0]["cache_control"], json!({"type": "ephemeral"}));
@@ -313,7 +408,10 @@ async fn anthropic_errors_are_classified() {
     let mid_stream: Vec<_> = attempt().await.unwrap().collect().await;
     assert!(matches!(mid_stream.last(), Some(Err(LlmError::Stream(message))) if message.contains("Overloaded")));
     let cut_off: Vec<_> = attempt().await.unwrap().collect().await;
-    assert!(matches!(cut_off.last(), Some(Err(LlmError::Stream(_)))), "EOF before message_stop is an error");
+    assert!(
+        matches!(cut_off.last(), Some(Err(LlmError::Stream(_)))),
+        "EOF before message_stop is an error"
+    );
 }
 
 #[tokio::test]
@@ -361,7 +459,10 @@ async fn anthropic_lists_models_across_pages() {
     })
     .await;
     let models = server.provider(Protocol::Anthropic, "/v1").list_models().await.unwrap();
-    assert_eq!(models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["claude-opus-5-5", "claude-haiku-5-5"]);
+    assert_eq!(
+        models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+        ["claude-opus-5-5", "claude-haiku-5-5"]
+    );
     assert_eq!(models[0].name, "Claude Opus 5.5");
     assert_eq!(models[0].context_window, Some(1_000_000));
     assert_eq!(server.requests()[0].path, "/v1/models");
@@ -375,22 +476,67 @@ fn responses_stream() -> String {
         "content": [{"type": "output_text", "text": "Reading it.", "annotations": []}]});
     let call = json!({"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "read_file", "arguments": "{\"path\":\"src/main.rs\"}", "status": "completed"});
     sse(&[
-        ("response.created", json!({"type": "response.created", "sequence_number": 0, "response": {"id": "resp_1", "status": "in_progress"}})),
-        ("response.output_item.added", json!({"type": "response.output_item.added", "output_index": 0, "item": {"type": "reasoning", "id": "rs_1", "summary": []}})),
-        ("response.reasoning_summary_part.added", json!({"type": "response.reasoning_summary_part.added", "item_id": "rs_1", "output_index": 0, "summary_index": 0, "part": {"type": "summary_text", "text": ""}})),
-        ("response.reasoning_summary_text.delta", json!({"type": "response.reasoning_summary_text.delta", "item_id": "rs_1", "output_index": 0, "summary_index": 0, "delta": "Inspecting files."})),
-        ("response.output_item.done", json!({"type": "response.output_item.done", "output_index": 0, "item": reasoning})),
-        ("response.output_item.added", json!({"type": "response.output_item.added", "output_index": 1, "item": {"type": "message", "id": "msg_1", "role": "assistant", "content": []}})),
-        ("response.output_text.delta", json!({"type": "response.output_text.delta", "item_id": "msg_1", "output_index": 1, "content_index": 0, "delta": "Reading "})),
-        ("response.output_text.delta", json!({"type": "response.output_text.delta", "item_id": "msg_1", "output_index": 1, "content_index": 0, "delta": "it."})),
-        ("response.output_item.done", json!({"type": "response.output_item.done", "output_index": 1, "item": message})),
-        ("response.output_item.added", json!({"type": "response.output_item.added", "output_index": 2, "item": {"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "read_file", "arguments": ""}})),
-        ("response.function_call_arguments.delta", json!({"type": "response.function_call_arguments.delta", "item_id": "fc_1", "output_index": 2, "delta": "{\"path\":"})),
-        ("response.function_call_arguments.delta", json!({"type": "response.function_call_arguments.delta", "item_id": "fc_1", "output_index": 2, "delta": "\"src/main.rs\"}"})),
-        ("response.function_call_arguments.done", json!({"type": "response.function_call_arguments.done", "item_id": "fc_1", "output_index": 2, "arguments": "{\"path\":\"src/main.rs\"}"})),
-        ("response.output_item.done", json!({"type": "response.output_item.done", "output_index": 2, "item": call})),
-        ("response.completed", json!({"type": "response.completed", "response": {"id": "resp_1", "model": "gpt-6.2-sol-2026-10-01", "status": "completed",
-            "usage": {"input_tokens": 1200, "input_tokens_details": {"cached_tokens": 1024, "cache_write_tokens": 0}, "output_tokens": 350, "output_tokens_details": {"reasoning_tokens": 192}, "total_tokens": 1550}}})),
+        (
+            "response.created",
+            json!({"type": "response.created", "sequence_number": 0, "response": {"id": "resp_1", "status": "in_progress"}}),
+        ),
+        (
+            "response.output_item.added",
+            json!({"type": "response.output_item.added", "output_index": 0, "item": {"type": "reasoning", "id": "rs_1", "summary": []}}),
+        ),
+        (
+            "response.reasoning_summary_part.added",
+            json!({"type": "response.reasoning_summary_part.added", "item_id": "rs_1", "output_index": 0, "summary_index": 0, "part": {"type": "summary_text", "text": ""}}),
+        ),
+        (
+            "response.reasoning_summary_text.delta",
+            json!({"type": "response.reasoning_summary_text.delta", "item_id": "rs_1", "output_index": 0, "summary_index": 0, "delta": "Inspecting files."}),
+        ),
+        (
+            "response.output_item.done",
+            json!({"type": "response.output_item.done", "output_index": 0, "item": reasoning}),
+        ),
+        (
+            "response.output_item.added",
+            json!({"type": "response.output_item.added", "output_index": 1, "item": {"type": "message", "id": "msg_1", "role": "assistant", "content": []}}),
+        ),
+        (
+            "response.output_text.delta",
+            json!({"type": "response.output_text.delta", "item_id": "msg_1", "output_index": 1, "content_index": 0, "delta": "Reading "}),
+        ),
+        (
+            "response.output_text.delta",
+            json!({"type": "response.output_text.delta", "item_id": "msg_1", "output_index": 1, "content_index": 0, "delta": "it."}),
+        ),
+        (
+            "response.output_item.done",
+            json!({"type": "response.output_item.done", "output_index": 1, "item": message}),
+        ),
+        (
+            "response.output_item.added",
+            json!({"type": "response.output_item.added", "output_index": 2, "item": {"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "read_file", "arguments": ""}}),
+        ),
+        (
+            "response.function_call_arguments.delta",
+            json!({"type": "response.function_call_arguments.delta", "item_id": "fc_1", "output_index": 2, "delta": "{\"path\":"}),
+        ),
+        (
+            "response.function_call_arguments.delta",
+            json!({"type": "response.function_call_arguments.delta", "item_id": "fc_1", "output_index": 2, "delta": "\"src/main.rs\"}"}),
+        ),
+        (
+            "response.function_call_arguments.done",
+            json!({"type": "response.function_call_arguments.done", "item_id": "fc_1", "output_index": 2, "arguments": "{\"path\":\"src/main.rs\"}"}),
+        ),
+        (
+            "response.output_item.done",
+            json!({"type": "response.output_item.done", "output_index": 2, "item": call}),
+        ),
+        (
+            "response.completed",
+            json!({"type": "response.completed", "response": {"id": "resp_1", "model": "gpt-6.2-sol-2026-10-01", "status": "completed",
+            "usage": {"input_tokens": 1200, "input_tokens_details": {"cached_tokens": 1024, "cache_write_tokens": 0}, "output_tokens": 350, "output_tokens_details": {"reasoning_tokens": 192}, "total_tokens": 1550}}}),
+        ),
     ])
 }
 
@@ -408,9 +554,18 @@ async fn openai_responses_streams_and_round_trips_items() {
     assert_eq!(done.model.as_deref(), Some("gpt-6.2-sol-2026-10-01"));
     assert_eq!(
         done.usage,
-        Usage { input_tokens: 1200, output_tokens: 350, cache_read_tokens: 1024, cache_write_tokens: 0, reasoning_tokens: 192 }
+        Usage {
+            input_tokens: 1200,
+            output_tokens: 350,
+            cache_read_tokens: 1024,
+            cache_write_tokens: 0,
+            reasoning_tokens: 192
+        }
     );
-    assert_eq!(tool_call(&done), ("call_1".into(), "read_file".into(), json!({"path": "src/main.rs"})));
+    assert_eq!(
+        tool_call(&done),
+        ("call_1".into(), "read_file".into(), json!({"path": "src/main.rs"}))
+    );
 
     let sent = &server.requests()[0];
     assert_eq!(sent.path, "/v1/responses");
@@ -432,7 +587,10 @@ async fn openai_responses_streams_and_round_trips_items() {
     assert_eq!(input[1]["encrypted_content"], "ENC");
     assert_eq!(input[2]["phase"], "commentary");
     assert_eq!(input[3]["id"], "fc_1");
-    assert_eq!(input[4], json!({"type": "function_call_output", "call_id": "call_1", "output": "fn main() {}"}));
+    assert_eq!(
+        input[4],
+        json!({"type": "function_call_output", "call_id": "call_1", "output": "fn main() {}"})
+    );
 }
 
 #[tokio::test]
@@ -474,8 +632,10 @@ async fn openai_responses_handles_incomplete_failed_and_rejected_settings() {
 // ------------------------------------------------- OpenAI-compatible chat
 
 fn chat_stream() -> String {
-    let chunk = |delta: Value, finish: Value| json!({"id": "gen-1", "object": "chat.completion.chunk", "created": 1, "model": "anthropic/claude-opus-5.5",
-        "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]});
+    let chunk = |delta: Value, finish: Value| {
+        json!({"id": "gen-1", "object": "chat.completion.chunk", "created": 1, "model": "anthropic/claude-opus-5.5",
+        "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]})
+    };
     let mut body = String::from(": OPENROUTER PROCESSING\n\n");
     body.push_str(&sse(&[
         ("", chunk(json!({"role": "assistant", "content": "", "reasoning": "Let me ", "reasoning_details": [{"type": "reasoning.text", "text": "Let me ", "signature": null, "format": "anthropic-claude-v1", "index": 0}]}), Value::Null)),
@@ -509,9 +669,18 @@ async fn chat_completions_streams_reasoning_details_and_tool_calls() {
     assert_eq!(done.stop_reason, StopReason::ToolUse);
     assert_eq!(
         done.usage,
-        Usage { input_tokens: 900, output_tokens: 60, cache_read_tokens: 800, cache_write_tokens: 50, reasoning_tokens: 20 }
+        Usage {
+            input_tokens: 900,
+            output_tokens: 60,
+            cache_read_tokens: 800,
+            cache_write_tokens: 50,
+            reasoning_tokens: 20
+        }
     );
-    assert_eq!(tool_call(&done), ("call_1".into(), "read_file".into(), json!({"path": "src/main.rs"})));
+    assert_eq!(
+        tool_call(&done),
+        ("call_1".into(), "read_file".into(), json!({"path": "src/main.rs"}))
+    );
 
     let sent = &server.requests()[0];
     assert_eq!(sent.path, "/openrouter.ai/api/v1/chat/completions");
@@ -534,7 +703,10 @@ async fn chat_completions_streams_reasoning_details_and_tool_calls() {
         json!([{"type": "reasoning.text", "text": "Let me check.", "signature": "SIG", "format": "anthropic-claude-v1", "index": 0}])
     );
     assert_eq!(messages[2]["tool_calls"][0]["id"], "call_1");
-    assert_eq!(messages[3], json!({"role": "tool", "tool_call_id": "call_1", "content": "fn main() {}"}));
+    assert_eq!(
+        messages[3],
+        json!({"role": "tool", "tool_call_id": "call_1", "content": "fn main() {}"})
+    );
 }
 
 #[tokio::test]
@@ -559,11 +731,17 @@ async fn chat_completions_tolerates_minimal_local_servers() {
     let done = completion(&events);
     assert_eq!(reasoning_of(&events), "hmm");
     assert_eq!(done.stop_reason, StopReason::ToolUse);
-    assert_eq!(tool_call(&done), ("abc".into(), "read_file".into(), json!({"path": "a"})));
+    assert_eq!(
+        tool_call(&done),
+        ("abc".into(), "read_file".into(), json!({"path": "a"}))
+    );
     let requests = server.requests();
     assert_eq!(requests.len(), 2);
     assert!(requests[1].body.get("stream_options").is_none());
-    assert!(requests[1].body.get("reasoning").is_none(), "no OpenRouter extras for generic servers");
+    assert!(
+        requests[1].body.get("reasoning").is_none(),
+        "no OpenRouter extras for generic servers"
+    );
     assert!(requests[1].headers.get("x-openrouter-title").is_none());
 }
 
@@ -584,27 +762,48 @@ async fn chat_completions_surfaces_mid_stream_errors_and_lists_tool_models() {
     .await;
     let provider = server.provider(Protocol::OpenaiChat, "/openrouter.ai/api/v1");
     let events = run(&provider, request("m")).await;
-    assert!(matches!(events.last(), Some(Err(LlmError::Stream(message))) if message.contains("Provider returned error")));
+    assert!(
+        matches!(events.last(), Some(Err(LlmError::Stream(message))) if message.contains("Provider returned error"))
+    );
 
     let models = provider.list_models().await.unwrap();
     assert_eq!(models.len(), 1);
-    assert_eq!((models[0].id.as_str(), models[0].context_window, models[0].max_output_tokens), ("z/with-tools", Some(200_000), Some(64_000)));
+    assert_eq!(
+        (
+            models[0].id.as_str(),
+            models[0].context_window,
+            models[0].max_output_tokens
+        ),
+        ("z/with-tools", Some(200_000), Some(64_000))
+    );
 }
 
 // ------------------------------------------------------------------ Gemini
 
 fn gemini_stream() -> String {
     sse(&[
-        ("", json!({"candidates": [{"content": {"role": "model", "parts": [{"text": "**Plan** read ", "thought": true}]}, "index": 0}],
-            "usageMetadata": {"promptTokenCount": 1234, "totalTokenCount": 1234}, "modelVersion": "gemini-4-hydrogen", "responseId": "r1"})),
-        ("", json!({"candidates": [{"content": {"role": "model", "parts": [{"text": "the file.", "thought": true}]}, "index": 0}], "modelVersion": "gemini-4-hydrogen"})),
-        ("", json!({"candidates": [{"content": {"role": "model", "parts": [{"text": "Reading it."}]}, "index": 0}], "modelVersion": "gemini-4-hydrogen"})),
-        ("", json!({"candidates": [{"content": {"role": "model", "parts": [
+        (
+            "",
+            json!({"candidates": [{"content": {"role": "model", "parts": [{"text": "**Plan** read ", "thought": true}]}, "index": 0}],
+            "usageMetadata": {"promptTokenCount": 1234, "totalTokenCount": 1234}, "modelVersion": "gemini-4-hydrogen", "responseId": "r1"}),
+        ),
+        (
+            "",
+            json!({"candidates": [{"content": {"role": "model", "parts": [{"text": "the file.", "thought": true}]}, "index": 0}], "modelVersion": "gemini-4-hydrogen"}),
+        ),
+        (
+            "",
+            json!({"candidates": [{"content": {"role": "model", "parts": [{"text": "Reading it."}]}, "index": 0}], "modelVersion": "gemini-4-hydrogen"}),
+        ),
+        (
+            "",
+            json!({"candidates": [{"content": {"role": "model", "parts": [
                 {"functionCall": {"id": "abc123", "name": "read_file", "args": {"path": "src/main.rs"}}, "thoughtSignature": "EpwC"},
                 {"functionCall": {"id": "def456", "name": "read_file", "args": {"path": "Cargo.toml"}}}
             ]}, "finishReason": "STOP", "index": 0}],
             "usageMetadata": {"promptTokenCount": 1234, "cachedContentTokenCount": 1024, "candidatesTokenCount": 18, "thoughtsTokenCount": 96, "totalTokenCount": 1348},
-            "modelVersion": "gemini-4-hydrogen"})),
+            "modelVersion": "gemini-4-hydrogen"}),
+        ),
     ])
 }
 
@@ -621,16 +820,35 @@ async fn gemini_streams_thoughts_and_parallel_function_calls() {
     assert_eq!(done.model.as_deref(), Some("gemini-4-hydrogen"));
     assert_eq!(
         done.usage,
-        Usage { input_tokens: 1234, output_tokens: 114, cache_read_tokens: 1024, cache_write_tokens: 0, reasoning_tokens: 96 }
+        Usage {
+            input_tokens: 1234,
+            output_tokens: 114,
+            cache_read_tokens: 1024,
+            cache_write_tokens: 0,
+            reasoning_tokens: 96
+        }
     );
-    let calls: Vec<_> = done.message.tool_calls().map(|c| (c.id.to_string(), c.input.clone())).collect();
-    assert_eq!(calls, [("abc123".to_string(), json!({"path": "src/main.rs"})), ("def456".to_string(), json!({"path": "Cargo.toml"}))]);
+    let calls: Vec<_> = done
+        .message
+        .tool_calls()
+        .map(|c| (c.id.to_string(), c.input.clone()))
+        .collect();
+    assert_eq!(
+        calls,
+        [
+            ("abc123".to_string(), json!({"path": "src/main.rs"})),
+            ("def456".to_string(), json!({"path": "Cargo.toml"}))
+        ]
+    );
 
     let sent = &server.requests()[0];
     assert_eq!(sent.path, "/v1beta/models/gemini-4-hydrogen:streamGenerateContent");
     assert_eq!(sent.query, "alt=sse");
     assert_eq!(sent.headers["x-goog-api-key"], "secret-key");
-    assert_eq!(sent.body["generationConfig"]["thinkingConfig"], json!({"includeThoughts": true, "thinkingLevel": "high"}));
+    assert_eq!(
+        sent.body["generationConfig"]["thinkingConfig"],
+        json!({"includeThoughts": true, "thinkingLevel": "high"})
+    );
     assert_eq!(sent.body["tools"][0]["functionDeclarations"][0]["name"], "read_file");
 
     // Second turn: model parts verbatim (thought, text, signed call), then
@@ -696,11 +914,17 @@ async fn gemini_handles_blocks_empty_turns_and_errors() {
     let empty = run(&provider, request("gemini-4-hydrogen")).await;
     assert!(matches!(empty.last(), Some(Err(LlmError::Stream(message))) if message.contains("empty response")));
     let malformed = run(&provider, request("gemini-4-hydrogen")).await;
-    assert!(matches!(malformed.last(), Some(Err(LlmError::Stream(message))) if message.contains("MALFORMED_FUNCTION_CALL")));
+    assert!(
+        matches!(malformed.last(), Some(Err(LlmError::Stream(message))) if message.contains("MALFORMED_FUNCTION_CALL"))
+    );
     let overloaded = run(&provider, request("gemini-4-hydrogen")).await;
     assert!(matches!(overloaded.last(), Some(Err(err)) if err.is_retryable()));
 
-    let quota = provider.stream(request("gemini-4-hydrogen")).await.err().expect("429 fails");
+    let quota = provider
+        .stream(request("gemini-4-hydrogen"))
+        .await
+        .err()
+        .expect("429 fails");
     assert!(quota.is_retryable());
     assert_eq!(quota.retry_after(), Some(std::time::Duration::from_secs(12)));
 
@@ -720,9 +944,16 @@ async fn gemini_lists_generation_models() {
         }
     })
     .await;
-    let models = server.provider(Protocol::Gemini, "/v1beta").list_models().await.unwrap();
+    let models = server
+        .provider(Protocol::Gemini, "/v1beta")
+        .list_models()
+        .await
+        .unwrap();
     assert_eq!(models.len(), 1);
-    assert_eq!((models[0].id.as_str(), models[0].name.as_str(), models[0].context_window), ("gemini-4-hydrogen", "Gemini 4 Hydrogen", Some(1_048_576)));
+    assert_eq!(
+        (models[0].id.as_str(), models[0].name.as_str(), models[0].context_window),
+        ("gemini-4-hydrogen", "Gemini 4 Hydrogen", Some(1_048_576))
+    );
     assert_eq!(server.requests().len(), 2);
 }
 
@@ -739,7 +970,9 @@ async fn dropping_the_stream_cancels_the_request() {
         let _ = socket.read(&mut buffer).await;
         let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n";
         let event = "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n";
-        let _ = socket.write_all(format!("{head}{:x}\r\n{event}\r\n", event.len()).as_bytes()).await;
+        let _ = socket
+            .write_all(format!("{head}{:x}\r\n{event}\r\n", event.len()).as_bytes())
+            .await;
         // Resolves once the client goes away.
         while matches!(socket.read(&mut buffer).await, Ok(n) if n > 0) {}
         let _ = closed_tx.send(());

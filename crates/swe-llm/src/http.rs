@@ -121,9 +121,7 @@ fn parse_retry_after(headers: &HeaderMap) -> Option<Duration> {
 }
 
 /// Send a request and turn any non-2xx answer into an [`ApiFailure`].
-pub(crate) async fn send(
-    request: reqwest::RequestBuilder,
-) -> Result<Result<reqwest::Response, ApiFailure>, LlmError> {
+pub(crate) async fn send(request: reqwest::RequestBuilder) -> Result<Result<reqwest::Response, ApiFailure>, LlmError> {
     let response = request.send().await.map_err(network_error)?;
     let status = response.status();
     if status.is_success() {
@@ -286,9 +284,19 @@ pub(crate) fn parse_tool_arguments(raw: &str) -> (Value, Option<String>) {
 pub(crate) fn sanitize_tool_id(id: &str) -> String {
     let cleaned: String = id
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
-    if cleaned.is_empty() { "call".to_string() } else { cleaned }
+    if cleaned.is_empty() {
+        "call".to_string()
+    } else {
+        cleaned
+    }
 }
 
 pub(crate) fn truncate(text: &str, max_chars: usize) -> String {
@@ -321,8 +329,11 @@ mod tests {
 
     #[test]
     fn maps_statuses_to_error_classes() {
-        let overloaded = failure(529, r#"{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#)
-            .into_error("anthropic");
+        let overloaded = failure(
+            529,
+            r#"{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#,
+        )
+        .into_error("anthropic");
         assert!(overloaded.is_retryable());
         assert!(overloaded.to_string().contains("Overloaded"));
 
@@ -330,8 +341,11 @@ mod tests {
         assert!(matches!(auth, LlmError::Auth(_)));
         assert!(!auth.is_retryable());
 
-        let overflow = failure(400, r#"{"error":{"message":"prompt is too long: 210000 tokens > 200000 maximum"}}"#)
-            .into_error("anthropic");
+        let overflow = failure(
+            400,
+            r#"{"error":{"message":"prompt is too long: 210000 tokens > 200000 maximum"}}"#,
+        )
+        .into_error("anthropic");
         assert!(matches!(overflow, LlmError::ContextOverflow(_)));
 
         let bad = failure(400, r#"{"error":{"message":"messages: bad shape"}}"#).into_error("anthropic");

@@ -34,7 +34,12 @@ impl Harness {
         let manager = SessionManager::open(Paths::at(home.path())).unwrap();
         let requests = provider.request_log();
         manager.registry().inject("mock", Arc::new(provider));
-        Harness { home, workspace, manager, requests }
+        Harness {
+            home,
+            workspace,
+            manager,
+            requests,
+        }
     }
 
     /// The directive-driven demo model, without artificial delays.
@@ -120,7 +125,9 @@ fn tool_results(events: &[Event]) -> Vec<(String, String, bool)> {
     events
         .iter()
         .filter_map(|event| match &event.kind {
-            EventKind::ToolFinished { name, output, is_error, .. } => Some((name.clone(), output.clone(), *is_error)),
+            EventKind::ToolFinished {
+                name, output, is_error, ..
+            } => Some((name.clone(), output.clone(), *is_error)),
             _ => None,
         })
         .collect()
@@ -144,8 +151,17 @@ fn user_text(request: &ChatRequest, index_from_end: usize) -> String {
 }
 
 fn git(dir: &Path, args: &[&str]) -> String {
-    let output = std::process::Command::new("git").arg("-C").arg(dir).args(args).output().unwrap();
-    assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
@@ -198,12 +214,21 @@ async fn a_turn_runs_tools_until_the_model_is_done() {
     let first_assistant = kinds.iter().position(|k| *k == "assistant").unwrap();
     assert!(kinds[..first_assistant].contains(&"reasoning_delta"));
     assert!(kinds[..first_assistant].contains(&"delta"));
-    assert!(events.iter().any(|event| matches!(&event.kind, EventKind::ToolFinished { display: Some(ToolDisplay::Diff { created: true, .. }), .. })));
+    assert!(events.iter().any(|event| matches!(
+        &event.kind,
+        EventKind::ToolFinished {
+            display: Some(ToolDisplay::Diff { created: true, .. }),
+            ..
+        }
+    )));
 
     let session = h.manager.get(&id).unwrap();
     let snapshot = session.snapshot();
     assert!(snapshot.events.iter().all(|event| !event.kind.is_transient()));
-    assert!(snapshot.events.windows(2).all(|pair| pair[1].seq == pair[0].seq + 1), "durable events are numbered densely");
+    assert!(
+        snapshot.events.windows(2).all(|pair| pair[1].seq == pair[0].seq + 1),
+        "durable events are numbered densely"
+    );
     assert!(snapshot.streaming.is_empty());
     let meta = session.meta();
     assert_eq!(meta.status, SessionStatus::Idle);
@@ -214,12 +239,26 @@ async fn a_turn_runs_tools_until_the_model_is_done() {
     let requests = h.requests();
     assert_eq!(requests.len(), 3);
     assert!(requests[0].system.contains("SWE Agent"));
-    assert!(requests[0].system.contains(&h.workspace.path().canonicalize().unwrap().to_string_lossy().into_owned()));
+    assert!(
+        requests[0].system.contains(
+            &h.workspace
+                .path()
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        )
+    );
     let tool_names: Vec<&str> = requests[0].tools.iter().map(|t| t.name.as_str()).collect();
     assert!(tool_names.contains(&"task") && tool_names.contains(&"todo_write") && tool_names.contains(&"bash"));
     assert!(user_text(&requests[0], 0).contains("Permission mode: full-auto"));
-    assert_eq!(requests[2].system, requests[0].system, "the system prompt never changes within a session");
-    assert!(matches!(&requests[2].messages.last().unwrap().content[0], ContentBlock::ToolResult { content, .. } if content == "hi"));
+    assert_eq!(
+        requests[2].system, requests[0].system,
+        "the system prompt never changes within a session"
+    );
+    assert!(
+        matches!(&requests[2].messages.last().unwrap().content[0], ContentBlock::ToolResult { content, .. } if content == "hi")
+    );
 }
 
 #[tokio::test]
@@ -237,22 +276,45 @@ async fn edits_wait_for_approval_and_respect_the_answer() {
         .unwrap();
 
     // First edit: approve.
-    let request = wait_for(&mut rx, &mut seen, |kind| matches!(kind, EventKind::ApprovalRequested { .. })).await;
-    let EventKind::ApprovalRequested { request_id, name, summary, always_label, .. } = &request.kind else { unreachable!() };
+    let request = wait_for(&mut rx, &mut seen, |kind| {
+        matches!(kind, EventKind::ApprovalRequested { .. })
+    })
+    .await;
+    let EventKind::ApprovalRequested {
+        request_id,
+        name,
+        summary,
+        always_label,
+        ..
+    } = &request.kind
+    else {
+        unreachable!()
+    };
     assert_eq!((name.as_str(), summary.as_str()), ("write_file", "a.txt"));
     assert_eq!(always_label.as_deref(), Some("Always allow `write_file`"));
     assert_eq!(session.meta().status, SessionStatus::WaitingApproval);
     assert_eq!(h.file("a.txt"), None, "nothing happens before the answer");
     assert!(session.resolve_approval(request_id, ApprovalDecision::Allow, None));
-    assert!(!session.resolve_approval(request_id, ApprovalDecision::Allow, None), "an approval is answered once");
+    assert!(
+        !session.resolve_approval(request_id, ApprovalDecision::Allow, None),
+        "an approval is answered once"
+    );
 
     // Second edit: deny with feedback.
-    let request = wait_for(&mut rx, &mut seen, |kind| matches!(kind, EventKind::ApprovalRequested { .. })).await;
-    let EventKind::ApprovalRequested { request_id, .. } = &request.kind else { unreachable!() };
+    let request = wait_for(&mut rx, &mut seen, |kind| {
+        matches!(kind, EventKind::ApprovalRequested { .. })
+    })
+    .await;
+    let EventKind::ApprovalRequested { request_id, .. } = &request.kind else {
+        unreachable!()
+    };
     assert_eq!(h.file("a.txt").as_deref(), Some("A"));
     session.resolve_approval(request_id, ApprovalDecision::Deny, Some("not that file".into()));
 
-    wait_for(&mut rx, &mut seen, |kind| matches!(kind, EventKind::TurnFinished { .. })).await;
+    wait_for(&mut rx, &mut seen, |kind| {
+        matches!(kind, EventKind::TurnFinished { .. })
+    })
+    .await;
     assert_eq!(outcome(&seen), TurnOutcome::Completed);
     assert_eq!(h.file("b.txt"), None);
     let results = tool_results(&seen);
@@ -263,7 +325,10 @@ async fn edits_wait_for_approval_and_respect_the_answer() {
     assert_eq!(session.meta().status, SessionStatus::Idle);
     // The model was told about the denial.
     let last_request = h.requests().pop().unwrap();
-    assert!(matches!(&last_request.messages.last().unwrap().content[0], ContentBlock::ToolResult { is_error: true, .. }));
+    assert!(matches!(
+        &last_request.messages.last().unwrap().content[0],
+        ContentBlock::ToolResult { is_error: true, .. }
+    ));
 }
 
 #[tokio::test]
@@ -279,26 +344,52 @@ async fn always_allow_stops_asking_for_matching_commands() {
             UserInput::text("!tool bash {\"command\": \"touch one.txt\"}\n!then\n!tool bash {\"command\": \"touch two.txt\"}\n!tool bash {\"command\": \"ls\"}\n!then\n!say done"),
         )
         .unwrap();
-    let request = wait_for(&mut rx, &mut seen, |kind| matches!(kind, EventKind::ApprovalRequested { .. })).await;
-    let EventKind::ApprovalRequested { request_id, always_label, reason, .. } = &request.kind else { unreachable!() };
+    let request = wait_for(&mut rx, &mut seen, |kind| {
+        matches!(kind, EventKind::ApprovalRequested { .. })
+    })
+    .await;
+    let EventKind::ApprovalRequested {
+        request_id,
+        always_label,
+        reason,
+        ..
+    } = &request.kind
+    else {
+        unreachable!()
+    };
     assert_eq!(always_label.as_deref(), Some("Always allow `touch …`"));
     assert!(reason.contains("Commands need approval"));
     session.resolve_approval(request_id, ApprovalDecision::AllowAlways, None);
 
-    wait_for(&mut rx, &mut seen, |kind| matches!(kind, EventKind::TurnFinished { .. })).await;
-    let approvals = seen.iter().filter(|event| matches!(event.kind, EventKind::ApprovalRequested { .. })).count();
+    wait_for(&mut rx, &mut seen, |kind| {
+        matches!(kind, EventKind::TurnFinished { .. })
+    })
+    .await;
+    let approvals = seen
+        .iter()
+        .filter(|event| matches!(event.kind, EventKind::ApprovalRequested { .. }))
+        .count();
     assert_eq!(approvals, 1, "the second touch and the read-only ls run without asking");
     assert!(h.file("one.txt").is_some() && h.file("two.txt").is_some());
 
     // The rule survives a restart of the process.
     drop(session);
     let reopened = SessionManager::open(Paths::at(h.home.path())).unwrap();
-    reopened.registry().inject("mock", Arc::new(MockProvider::demo("mock").with_chunk_delay(Duration::ZERO)));
+    reopened.registry().inject(
+        "mock",
+        Arc::new(MockProvider::demo("mock").with_chunk_delay(Duration::ZERO)),
+    );
     let session = reopened.get(&id).unwrap();
     let mut rx = session.subscribe(session.meta().last_seq).1;
-    reopened.send_message(&id, UserInput::text("!tool bash {\"command\": \"touch three.txt\"}")).unwrap();
+    reopened
+        .send_message(&id, UserInput::text("!tool bash {\"command\": \"touch three.txt\"}"))
+        .unwrap();
     let events = collect_turn(&mut rx).await;
-    assert!(!events.iter().any(|event| matches!(event.kind, EventKind::ApprovalRequested { .. })));
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event.kind, EventKind::ApprovalRequested { .. }))
+    );
     assert!(h.file("three.txt").is_some());
 }
 
@@ -306,15 +397,30 @@ async fn always_allow_stops_asking_for_matching_commands() {
 async fn plan_mode_blocks_edits_and_mode_changes_are_announced() {
     let h = Harness::scripted();
     let id = h.create(PermissionMode::Plan);
-    let events = h.turn(&id, "!tool write_file {\"path\": \"x.txt\", \"content\": \"x\"}\n!then\n!say Here is the plan.").await;
+    let events = h
+        .turn(
+            &id,
+            "!tool write_file {\"path\": \"x.txt\", \"content\": \"x\"}\n!then\n!say Here is the plan.",
+        )
+        .await;
     assert_eq!(outcome(&events), TurnOutcome::Completed);
     assert_eq!(h.file("x.txt"), None);
     let results = tool_results(&events);
     assert!(results[0].2 && results[0].1.contains("Plan mode is read-only"));
     assert!(user_text(&h.requests()[0], 0).contains("Permission mode: plan"));
 
-    h.manager.update(&id, UpdateSession { mode: Some(PermissionMode::FullAuto), ..Default::default() }).unwrap();
-    let events = h.turn(&id, "!tool write_file {\"path\": \"x.txt\", \"content\": \"x\"}").await;
+    h.manager
+        .update(
+            &id,
+            UpdateSession {
+                mode: Some(PermissionMode::FullAuto),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let events = h
+        .turn(&id, "!tool write_file {\"path\": \"x.txt\", \"content\": \"x\"}")
+        .await;
     assert_eq!(outcome(&events), TurnOutcome::Completed);
     assert_eq!(h.file("x.txt").as_deref(), Some("x"));
     let second_turn = h.requests()[2].clone();
@@ -322,7 +428,10 @@ async fn plan_mode_blocks_edits_and_mode_changes_are_announced() {
 
     h.turn(&id, "!say nothing to do").await;
     let third_turn = h.requests().pop().unwrap();
-    assert!(!user_text(&third_turn, 0).contains("Permission mode"), "an unchanged mode is not repeated");
+    assert!(
+        !user_text(&third_turn, 0).contains("Permission mode"),
+        "an unchanged mode is not repeated"
+    );
 }
 
 #[tokio::test]
@@ -386,9 +495,21 @@ async fn truncated_or_malformed_tool_calls_are_never_executed() {
         meta: None,
     };
     let h = Harness::new(MockProvider::scripted(vec![
-        MockReply::Message { content: vec![truncated], stop_reason: Some(StopReason::MaxTokens), usage: None },
-        MockReply::Message { content: vec![malformed], stop_reason: None, usage: None },
-        MockReply::Message { content: vec![ContentBlock::text("cut off mid-sen")], stop_reason: Some(StopReason::MaxTokens), usage: None },
+        MockReply::Message {
+            content: vec![truncated],
+            stop_reason: Some(StopReason::MaxTokens),
+            usage: None,
+        },
+        MockReply::Message {
+            content: vec![malformed],
+            stop_reason: None,
+            usage: None,
+        },
+        MockReply::Message {
+            content: vec![ContentBlock::text("cut off mid-sen")],
+            stop_reason: Some(StopReason::MaxTokens),
+            usage: None,
+        },
         MockReply::text("tence, finished."),
     ]));
     let id = h.create(PermissionMode::FullAuto);
@@ -409,7 +530,12 @@ async fn sub_agents_run_in_parallel_with_their_own_context_and_tools() {
     let id = h.create_with(PermissionMode::FullAuto, "orchestrator");
     let writer = json!({"description": "Write alpha", "prompt": "!tool write_file {\"path\": \"alpha.txt\", \"content\": \"a\"}\n!then\n!say alpha written"});
     let explorer = json!({"description": "Look around", "agent_type": "explore", "prompt": "!tool write_file {\"path\": \"beta.txt\", \"content\": \"b\"}\n!then\n!say cannot write"});
-    let events = h.turn(&id, &format!("!tool task {writer}\n!tool task {explorer}\n!then\n!say integrated")).await;
+    let events = h
+        .turn(
+            &id,
+            &format!("!tool task {writer}\n!tool task {explorer}\n!then\n!say integrated"),
+        )
+        .await;
     assert_eq!(outcome(&events), TurnOutcome::Completed);
     assert_eq!(h.file("alpha.txt").as_deref(), Some("a"));
     assert_eq!(h.file("beta.txt"), None, "explore agents have no write tools");
@@ -417,7 +543,12 @@ async fn sub_agents_run_in_parallel_with_their_own_context_and_tools() {
     let spawned: Vec<(&Event, &str, &str)> = events
         .iter()
         .filter_map(|event| match &event.kind {
-            EventKind::AgentSpawned { parent_agent_id, agent_type, description, .. } => {
+            EventKind::AgentSpawned {
+                parent_agent_id,
+                agent_type,
+                description,
+                ..
+            } => {
                 assert_eq!(parent_agent_id, ROOT_AGENT);
                 Some((event, agent_type.as_str(), description.as_str()))
             }
@@ -425,13 +556,35 @@ async fn sub_agents_run_in_parallel_with_their_own_context_and_tools() {
         })
         .collect();
     assert_eq!(spawned.len(), 2);
-    let writer_id = &spawned.iter().find(|(_, kind, _)| *kind == "general").unwrap().0.agent_id;
-    let explorer_id = &spawned.iter().find(|(_, kind, _)| *kind == "explore").unwrap().0.agent_id;
+    let writer_id = &spawned
+        .iter()
+        .find(|(_, kind, _)| *kind == "general")
+        .unwrap()
+        .0
+        .agent_id;
+    let explorer_id = &spawned
+        .iter()
+        .find(|(_, kind, _)| *kind == "explore")
+        .unwrap()
+        .0
+        .agent_id;
     assert_ne!(writer_id, explorer_id);
     assert_eq!(assistant_texts(&events, writer_id), ["alpha written"]);
     assert!(events.iter().any(|event| &event.agent_id == explorer_id
         && matches!(&event.kind, EventKind::ToolFinished { output, is_error: true, .. } if output.contains("Unknown tool `write_file`"))));
-    assert_eq!(events.iter().filter(|event| matches!(event.kind, EventKind::AgentFinished { outcome: TurnOutcome::Completed, .. })).count(), 2);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(
+                event.kind,
+                EventKind::AgentFinished {
+                    outcome: TurnOutcome::Completed,
+                    ..
+                }
+            ))
+            .count(),
+        2
+    );
 
     // The reports are the task tool results of the root agent. The agents run
     // concurrently, so their completion events can arrive in either order.
@@ -446,7 +599,12 @@ async fn sub_agents_run_in_parallel_with_their_own_context_and_tools() {
     reports.sort();
     assert_eq!(reports, ["alpha written", "cannot write"]);
     // The model, however, gets the results in the order it made the calls.
-    let integration = h.requests().into_iter().rev().find(|request| request.system.contains("# Your role: orchestrator")).unwrap();
+    let integration = h
+        .requests()
+        .into_iter()
+        .rev()
+        .find(|request| request.system.contains("# Your role: orchestrator"))
+        .unwrap();
     let fed_back: Vec<&str> = integration
         .messages
         .last()
@@ -462,10 +620,16 @@ async fn sub_agents_run_in_parallel_with_their_own_context_and_tools() {
 
     // Sub-agents start from their prompt alone, with a sub-agent system prompt.
     let requests = h.requests();
-    let sub_request = requests.iter().find(|request| request.system.contains("# Your role: sub-agent")).unwrap();
+    let sub_request = requests
+        .iter()
+        .find(|request| request.system.contains("# Your role: sub-agent"))
+        .unwrap();
     assert_eq!(sub_request.messages.len(), 1);
     assert!(requests[0].system.contains("# Your role: orchestrator"));
-    let explore_request = requests.iter().find(|request| request.system.contains("read-only research agent")).unwrap();
+    let explore_request = requests
+        .iter()
+        .find(|request| request.system.contains("read-only research agent"))
+        .unwrap();
     let explore_tools: Vec<&str> = explore_request.tools.iter().map(|t| t.name.as_str()).collect();
     assert_eq!(explore_tools, ["glob", "grep", "list_dir", "read_file", "web_fetch"]);
     // Usage of the sub-agents is part of the session total.
@@ -479,12 +643,26 @@ async fn isolated_sub_agents_work_on_their_own_branch() {
     let id = h.create(PermissionMode::FullAuto);
     let task = json!({"description": "Add feature file", "isolation": "worktree",
         "prompt": "!tool write_file {\"path\": \"feature.txt\", \"content\": \"new\"}\n!then\n!say feature added"});
-    let events = h.turn(&id, &format!("!tool task {task}\n!then\n!say merged later")).await;
+    let events = h
+        .turn(&id, &format!("!tool task {task}\n!then\n!say merged later"))
+        .await;
     assert_eq!(outcome(&events), TurnOutcome::Completed);
 
-    let spawned = events.iter().find(|event| matches!(event.kind, EventKind::AgentSpawned { .. })).unwrap();
-    let EventKind::AgentSpawned { worktree: Some(worktree), .. } = &spawned.kind else { panic!("expected a worktree") };
-    assert!(!Path::new(worktree).exists(), "the checkout is removed when the agent is done");
+    let spawned = events
+        .iter()
+        .find(|event| matches!(event.kind, EventKind::AgentSpawned { .. }))
+        .unwrap();
+    let EventKind::AgentSpawned {
+        worktree: Some(worktree),
+        ..
+    } = &spawned.kind
+    else {
+        panic!("expected a worktree")
+    };
+    assert!(
+        !Path::new(worktree).exists(),
+        "the checkout is removed when the agent is done"
+    );
     assert_eq!(h.file("feature.txt"), None, "the workspace is untouched");
 
     let branch = format!("swe/{}", spawned.agent_id);
@@ -497,8 +675,14 @@ async fn isolated_sub_agents_work_on_their_own_branch() {
         .unwrap();
     assert!(report.starts_with("feature added"));
     assert!(report.contains(&format!("branch `{branch}` (1 commit")), "{report}");
-    assert_eq!(git(h.workspace.path(), &["show", &format!("{branch}:feature.txt")]), "new");
-    assert_eq!(git(h.workspace.path(), &["log", "-1", "--format=%s", &branch]), "Add feature file");
+    assert_eq!(
+        git(h.workspace.path(), &["show", &format!("{branch}:feature.txt")]),
+        "new"
+    );
+    assert_eq!(
+        git(h.workspace.path(), &["log", "-1", "--format=%s", &branch]),
+        "Add feature file"
+    );
 }
 
 #[tokio::test]
@@ -511,10 +695,16 @@ async fn cancelling_stops_the_model_and_running_tools() {
     let mut rx = h.subscribe(&id);
     let mut seen = Vec::new();
     h.manager.send_message(&id, UserInput::text("talk")).unwrap();
-    wait_for(&mut rx, &mut seen, |kind| matches!(kind, EventKind::AssistantDelta { .. })).await;
+    wait_for(&mut rx, &mut seen, |kind| {
+        matches!(kind, EventKind::AssistantDelta { .. })
+    })
+    .await;
     assert!(h.manager.get(&id).unwrap().is_running());
     h.manager.cancel(&id).unwrap();
-    wait_for(&mut rx, &mut seen, |kind| matches!(kind, EventKind::TurnFinished { .. })).await;
+    wait_for(&mut rx, &mut seen, |kind| {
+        matches!(kind, EventKind::TurnFinished { .. })
+    })
+    .await;
     assert_eq!(outcome(&seen), TurnOutcome::Cancelled);
     let partial = assistant_texts(&seen, ROOT_AGENT);
     assert_eq!(partial.len(), 1);
@@ -529,10 +719,18 @@ async fn cancelling_stops_the_model_and_running_tools() {
     let mut rx = h.subscribe(&id);
     let mut seen = Vec::new();
     let started = std::time::Instant::now();
-    h.manager.send_message(&id, UserInput::text("!tool bash {\"command\": \"sleep 30\"}\n!then\n!say after")).unwrap();
+    h.manager
+        .send_message(
+            &id,
+            UserInput::text("!tool bash {\"command\": \"sleep 30\"}\n!then\n!say after"),
+        )
+        .unwrap();
     wait_for(&mut rx, &mut seen, |kind| matches!(kind, EventKind::ToolStarted { .. })).await;
     h.manager.cancel(&id).unwrap();
-    wait_for(&mut rx, &mut seen, |kind| matches!(kind, EventKind::TurnFinished { .. })).await;
+    wait_for(&mut rx, &mut seen, |kind| {
+        matches!(kind, EventKind::TurnFinished { .. })
+    })
+    .await;
     assert!(started.elapsed() < Duration::from_secs(10));
     assert_eq!(outcome(&seen), TurnOutcome::Cancelled);
     assert!(tool_results(&seen)[0].1.contains("stopped by the user"));
@@ -586,8 +784,16 @@ async fn transient_failures_are_retried_and_fatal_ones_end_the_turn() {
 
     let events = h.turn(&id, "again").await;
     assert_eq!(outcome(&events), TurnOutcome::Error);
-    assert!(events.iter().any(|event| matches!(&event.kind, EventKind::Error { message } if message.contains("invalid key"))));
-    assert!(!events.iter().any(|event| matches!(event.kind, EventKind::Retrying { .. })));
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(&event.kind, EventKind::Error { message } if message.contains("invalid key")))
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event.kind, EventKind::Retrying { .. }))
+    );
     let meta = h.manager.get(&id).unwrap().meta();
     assert_eq!(meta.status, SessionStatus::Error);
     assert!(meta.error.unwrap().contains("invalid key"));
@@ -603,7 +809,10 @@ async fn transient_failures_are_retried_and_fatal_ones_end_the_turn() {
 
 #[tokio::test]
 async fn long_conversations_are_compacted_into_a_summary() {
-    let config = Config { compact_threshold_tokens: 10_000, ..Default::default() };
+    let config = Config {
+        compact_threshold_tokens: 10_000,
+        ..Default::default()
+    };
     let provider = MockProvider::from_fn(|request| {
         if request.system.contains("hand-over summaries") {
             return MockReply::text("SUMMARY: the user wants a parser; lexer.rs is done.");
@@ -611,8 +820,13 @@ async fn long_conversations_are_compacted_into_a_summary() {
         let turns = request.messages.iter().filter(|m| m.role == Role::Assistant).count();
         match turns {
             // The first answer reports a context far above the threshold.
-            0 if request.messages.len() == 1 && !request.messages[0].text().contains("SUMMARY") => MockReply::text("First answer.")
-                .with_usage(Usage { input_tokens: 50_000, output_tokens: 100, ..Default::default() }),
+            0 if request.messages.len() == 1 && !request.messages[0].text().contains("SUMMARY") => {
+                MockReply::text("First answer.").with_usage(Usage {
+                    input_tokens: 50_000,
+                    output_tokens: 100,
+                    ..Default::default()
+                })
+            }
             _ => MockReply::text("Continuing after the summary."),
         }
     });
@@ -630,7 +844,13 @@ async fn long_conversations_are_compacted_into_a_summary() {
             _ => None,
         })
         .expect("a compaction event");
-    assert_eq!(compacted, ("SUMMARY: the user wants a parser; lexer.rs is done.".to_string(), 50_100));
+    assert_eq!(
+        compacted,
+        (
+            "SUMMARY: the user wants a parser; lexer.rs is done.".to_string(),
+            50_100
+        )
+    );
 
     let requests = h.requests();
     assert_eq!(requests.len(), 3);
@@ -638,7 +858,10 @@ async fn long_conversations_are_compacted_into_a_summary() {
     assert!(requests[1].tools.is_empty());
     let transcript = requests[1].messages[0].text();
     assert!(transcript.contains("Build a parser") && transcript.contains("First answer."));
-    assert!(!transcript.contains("Now add error recovery"), "the unanswered message is not summarised away");
+    assert!(
+        !transcript.contains("Now add error recovery"),
+        "the unanswered message is not summarised away"
+    );
     // The next request is the summary plus the pending message, and nothing else.
     assert_eq!(requests[2].messages.len(), 1);
     let resumed = requests[2].messages[0].text();
@@ -669,9 +892,17 @@ async fn a_context_overflow_from_the_provider_triggers_compaction() {
     h.turn(&id, "first").await;
     let events = h.turn(&id, "second").await;
     assert_eq!(outcome(&events), TurnOutcome::Completed);
-    assert!(events.iter().any(|event| matches!(event.kind, EventKind::Compacted { .. })));
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event.kind, EventKind::Compacted { .. }))
+    );
     assert_eq!(assistant_texts(&events, ROOT_AGENT), ["fits now"]);
-    assert!(h.requests().pop().unwrap().messages[0].text().contains("SUMMARY of earlier work."));
+    assert!(
+        h.requests().pop().unwrap().messages[0]
+            .text()
+            .contains("SUMMARY of earlier work.")
+    );
 }
 
 #[tokio::test]
@@ -682,14 +913,23 @@ async fn messages_sent_during_a_turn_steer_it() {
     let mut seen = Vec::new();
     let queued = h
         .manager
-        .send_message(&id, UserInput::text("!tool bash {\"command\": \"sleep 0.5\"}\n!then\n!say first plan finished"))
+        .send_message(
+            &id,
+            UserInput::text("!tool bash {\"command\": \"sleep 0.5\"}\n!then\n!say first plan finished"),
+        )
         .unwrap();
     assert!(!queued);
     wait_for(&mut rx, &mut seen, |kind| matches!(kind, EventKind::ToolStarted { .. })).await;
-    let queued = h.manager.send_message(&id, UserInput::text("!say steering received")).unwrap();
+    let queued = h
+        .manager
+        .send_message(&id, UserInput::text("!say steering received"))
+        .unwrap();
     assert!(queued, "a running turn queues the message instead of starting another");
 
-    wait_for(&mut rx, &mut seen, |kind| matches!(kind, EventKind::TurnFinished { .. })).await;
+    wait_for(&mut rx, &mut seen, |kind| {
+        matches!(kind, EventKind::TurnFinished { .. })
+    })
+    .await;
     let user_messages: Vec<&str> = seen
         .iter()
         .filter_map(|event| match &event.kind {
@@ -699,7 +939,12 @@ async fn messages_sent_during_a_turn_steer_it() {
         .collect();
     assert_eq!(user_messages.len(), 2);
     assert_eq!(user_messages[1], "!say steering received");
-    assert_eq!(seen.iter().filter(|event| matches!(event.kind, EventKind::TurnFinished { .. })).count(), 1);
+    assert_eq!(
+        seen.iter()
+            .filter(|event| matches!(event.kind, EventKind::TurnFinished { .. }))
+            .count(),
+        1
+    );
     // The steering text rode along with the tool result of the step in flight.
     let request = h.requests()[1].clone();
     let last = request.messages.last().unwrap();
@@ -739,7 +984,9 @@ async fn sessions_survive_a_restart() {
 
     // The conversation continues with its full history and the same system prompt.
     let mut rx = session.subscribe(after.meta.last_seq).1;
-    reopened.send_message(&id, UserInput::text("!say welcome back")).unwrap();
+    reopened
+        .send_message(&id, UserInput::text("!say welcome back"))
+        .unwrap();
     let events = collect_turn(&mut rx).await;
     assert_eq!(outcome(&events), TurnOutcome::Completed);
     assert_eq!(events[0].seq, before.meta.last_seq + 1, "sequence numbers continue");
@@ -750,7 +997,10 @@ async fn sessions_survive_a_restart() {
 
     // Replay from a sequence number returns exactly the newer events.
     let (replay, _) = session.subscribe(before.meta.last_seq);
-    assert_eq!(replay.len(), events.iter().filter(|event| !event.kind.is_transient()).count());
+    assert_eq!(
+        replay.len(),
+        events.iter().filter(|event| !event.kind.is_transient()).count()
+    );
 }
 
 #[tokio::test]
@@ -759,15 +1009,27 @@ async fn sessions_can_be_listed_updated_and_deleted() {
     let first = h.create(PermissionMode::Ask);
     let second = h.create(PermissionMode::Ask);
     h.turn(&second, "!say hi").await;
-    assert_eq!(h.manager.list().iter().map(|m| m.id.clone()).collect::<Vec<_>>(), [second.clone(), first.clone()]);
+    assert_eq!(
+        h.manager.list().iter().map(|m| m.id.clone()).collect::<Vec<_>>(),
+        [second.clone(), first.clone()]
+    );
 
     let mut global = h.manager.subscribe_global();
     let updated = h
         .manager
-        .update(&first, UpdateSession { title: Some("  Renamed ".into()), model: Some("other".into()), ..Default::default() })
+        .update(
+            &first,
+            UpdateSession {
+                title: Some("  Renamed ".into()),
+                model: Some("other".into()),
+                ..Default::default()
+            },
+        )
         .unwrap();
     assert_eq!((updated.title.as_str(), updated.model.as_str()), ("Renamed", "other"));
-    assert!(matches!(global.recv().await.unwrap(), swe_core::GlobalEvent::SessionUpdated { session } if session.title == "Renamed"));
+    assert!(
+        matches!(global.recv().await.unwrap(), swe_core::GlobalEvent::SessionUpdated { session } if session.title == "Renamed")
+    );
 
     h.manager.delete(&first).unwrap();
     assert!(matches!(global.recv().await.unwrap(), swe_core::GlobalEvent::SessionDeleted { id } if id == first));
@@ -777,8 +1039,25 @@ async fn sessions_can_be_listed_updated_and_deleted() {
 
     // Invalid requests are rejected up front.
     assert!(h.manager.send_message(&second, UserInput::text("   ")).is_err());
-    assert!(h.manager.create(CreateSession { workspace: "/definitely/not/here".into(), provider: Some("mock".into()), model: Some("demo".into()), ..Default::default() }).is_err());
-    assert!(h.manager.create(CreateSession { workspace: h.workspace.path().to_string_lossy().into_owned(), ..Default::default() }).is_err(), "a model is required");
+    assert!(
+        h.manager
+            .create(CreateSession {
+                workspace: "/definitely/not/here".into(),
+                provider: Some("mock".into()),
+                model: Some("demo".into()),
+                ..Default::default()
+            })
+            .is_err()
+    );
+    assert!(
+        h.manager
+            .create(CreateSession {
+                workspace: h.workspace.path().to_string_lossy().into_owned(),
+                ..Default::default()
+            })
+            .is_err(),
+        "a model is required"
+    );
 }
 
 #[tokio::test]
@@ -796,5 +1075,9 @@ async fn a_missing_api_key_is_reported_as_a_turn_error() {
         .id;
     let events = h.turn(&id, "hello").await;
     assert_eq!(outcome(&events), TurnOutcome::Error);
-    assert!(events.iter().any(|event| matches!(&event.kind, EventKind::Error { message } if message.contains("unknown provider"))));
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(&event.kind, EventKind::Error { message } if message.contains("unknown provider")))
+    );
 }

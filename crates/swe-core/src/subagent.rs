@@ -36,12 +36,18 @@ pub(crate) struct AgentIdentity {
 /// Tools of the root agent: everything.
 pub(crate) async fn root_tools(env: &Env, me: &AgentIdentity, config: &Config) -> ToolRegistry {
     let mut tools = ToolRegistry::builtin();
-    tools.add(Arc::new(TodoWrite { session: env.session.clone(), agent_id: me.agent_id.clone() }));
+    tools.add(Arc::new(TodoWrite {
+        session: env.session.clone(),
+        agent_id: me.agent_id.clone(),
+    }));
     for tool in env.manager.mcp.tools().await {
         tools.add(tool);
     }
     if me.depth < config.max_agent_depth {
-        tools.add(Arc::new(TaskTool { env: env.clone(), parent: me.clone() }));
+        tools.add(Arc::new(TaskTool {
+            env: env.clone(),
+            parent: me.clone(),
+        }));
     }
     tools
 }
@@ -50,14 +56,19 @@ pub(crate) async fn root_tools(env: &Env, me: &AgentIdentity, config: &Config) -
 async fn subagent_tools(env: &Env, agent_type: &str, me: &AgentIdentity, config: &Config) -> ToolRegistry {
     let mut tools = ToolRegistry::builtin();
     match agent_type {
-        "explore" => tools.retain(|tool| matches!(tool.name(), "read_file" | "list_dir" | "glob" | "grep" | "web_fetch")),
+        "explore" => {
+            tools.retain(|tool| matches!(tool.name(), "read_file" | "list_dir" | "glob" | "grep" | "web_fetch"))
+        }
         "review" => tools.retain(|tool| !matches!(tool.kind(), ToolKind::Edit)),
         _ => {
             for tool in env.manager.mcp.tools().await {
                 tools.add(tool);
             }
             if me.depth < config.max_agent_depth {
-                tools.add(Arc::new(TaskTool { env: env.clone(), parent: me.clone() }));
+                tools.add(Arc::new(TaskTool {
+                    env: env.clone(),
+                    parent: me.clone(),
+                }));
             }
         }
     }
@@ -86,7 +97,10 @@ impl Tool for TaskTool {
     }
 
     fn description(&self) -> String {
-        let types: Vec<String> = SUBAGENT_TYPES.iter().map(|(name, about)| format!("`{name}`: {about}")).collect();
+        let types: Vec<String> = SUBAGENT_TYPES
+            .iter()
+            .map(|(name, about)| format!("`{name}`: {about}"))
+            .collect();
         format!(
             "Start a sub-agent that works on a task on its own and returns a report. The sub-agent starts \
              with an empty context: it sees only `prompt`, so put everything it needs there (goal, relevant \
@@ -131,7 +145,10 @@ impl Tool for TaskTool {
         let agent_type = args.agent_type.as_deref().unwrap_or("general");
         if !SUBAGENT_TYPES.iter().any(|(name, _)| *name == agent_type) {
             let known: Vec<&str> = SUBAGENT_TYPES.iter().map(|(name, _)| *name).collect();
-            return ToolOutput::error(format!("Unknown agent_type `{agent_type}`. Use one of: {}.", known.join(", ")));
+            return ToolOutput::error(format!(
+                "Unknown agent_type `{agent_type}`. Use one of: {}.",
+                known.join(", ")
+            ));
         }
         if args.prompt.trim().is_empty() {
             return ToolOutput::error("prompt is empty.");
@@ -140,8 +157,14 @@ impl Tool for TaskTool {
         let session = &env.session;
         let config = env.manager.config();
 
-        let provider_id = config.subagent_provider.clone().unwrap_or_else(|| self.parent.provider_id.clone());
-        let model = config.subagent_model.clone().unwrap_or_else(|| self.parent.model.clone());
+        let provider_id = config
+            .subagent_provider
+            .clone()
+            .unwrap_or_else(|| self.parent.provider_id.clone());
+        let model = config
+            .subagent_model
+            .clone()
+            .unwrap_or_else(|| self.parent.model.clone());
         let provider = match env.manager.registry.get(&provider_id) {
             Ok(provider) => provider,
             Err(err) => return ToolOutput::error(format!("Cannot start the sub-agent: {err}")),
@@ -211,7 +234,13 @@ impl Tool for TaskTool {
         );
         let mut history = vec![Message::user_text(args.prompt)];
         let result = agent::run_agent(env, &spec, &mut history, None).await;
-        session.emit(&agent_id, EventKind::AgentFinished { outcome: result.outcome, usage: result.usage });
+        session.emit(
+            &agent_id,
+            EventKind::AgentFinished {
+                outcome: result.outcome,
+                usage: result.usage,
+            },
+        );
 
         let mut report = result.final_text.trim().to_string();
         if report.is_empty() {
@@ -228,9 +257,9 @@ impl Tool for TaskTool {
                 "The sub-agent failed: {}\n\nIts last output:\n{report}",
                 result.error.unwrap_or_else(|| "unknown error".into())
             )),
-            TurnOutcome::Refusal => {
-                ToolOutput::error(format!("The model declined to continue the sub-agent's task.\n\n{report}"))
-            }
+            TurnOutcome::Refusal => ToolOutput::error(format!(
+                "The model declined to continue the sub-agent's task.\n\n{report}"
+            )),
             TurnOutcome::StepLimit => ToolOutput::error(format!(
                 "The sub-agent hit its step limit before finishing. Its last output:\n{report}"
             )),
@@ -299,7 +328,11 @@ impl Tool for TodoWrite {
             Err(output) => return output,
         };
         let total = args.todos.len();
-        let done = args.todos.iter().filter(|todo| todo.status == swe_protocol::TodoStatus::Completed).count();
+        let done = args
+            .todos
+            .iter()
+            .filter(|todo| todo.status == swe_protocol::TodoStatus::Completed)
+            .count();
         self.session.set_todos(&self.agent_id, args.todos);
         ToolOutput::ok(format!("Todo list updated ({done}/{total} completed)."))
     }

@@ -49,7 +49,10 @@ pub struct UserInput {
 
 impl UserInput {
     pub fn text(text: impl Into<String>) -> Self {
-        UserInput { text: text.into(), images: Vec::new() }
+        UserInput {
+            text: text.into(),
+            images: Vec::new(),
+        }
     }
 }
 
@@ -102,12 +105,15 @@ pub struct SessionSnapshot {
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum GlobalEvent {
-    SessionUpdated { session: SessionMeta },
+    SessionUpdated { session: Box<SessionMeta> },
     SessionDeleted { id: String },
 }
 
 pub(crate) enum ApprovalOutcome {
-    Decided { decision: ApprovalDecision, feedback: Option<String> },
+    Decided {
+        decision: ApprovalDecision,
+        feedback: Option<String>,
+    },
     Cancelled,
 }
 
@@ -158,6 +164,9 @@ struct ActiveRun {
 
 type Notify = Arc<dyn Fn(&SessionMeta) + Send + Sync>;
 
+/// Delivers the user's answer (and optional feedback) to a waiting tool call.
+type ApprovalSender = oneshot::Sender<(ApprovalDecision, Option<String>)>;
+
 pub struct Session {
     pub id: String,
     dir: PathBuf,
@@ -167,7 +176,7 @@ pub struct Session {
     events_tx: broadcast::Sender<Event>,
     streaming: Mutex<HashMap<String, StreamingSnapshot>>,
     policy: Mutex<PermissionPolicy>,
-    approvals: Mutex<HashMap<String, oneshot::Sender<(ApprovalDecision, Option<String>)>>>,
+    approvals: Mutex<HashMap<String, ApprovalSender>>,
     shell: Arc<ShellManager>,
     steering: Mutex<VecDeque<UserInput>>,
     run: Mutex<Option<ActiveRun>>,
@@ -191,7 +200,11 @@ impl Session {
                 messages: state.messages,
                 announced_mode: state.announced_mode,
             }),
-            log: Mutex::new(EventLog { file: None, seq, events }),
+            log: Mutex::new(EventLog {
+                file: None,
+                seq,
+                events,
+            }),
             events_tx,
             streaming: Mutex::new(HashMap::new()),
             policy: Mutex::new(policy),
@@ -278,7 +291,11 @@ impl Session {
             let mut streaming = self.streaming.lock().unwrap();
             match &kind {
                 EventKind::AssistantDelta { text } => {
-                    streaming.entry(agent_id.to_string()).or_insert_with(|| snapshot_for(agent_id)).text.push_str(text);
+                    streaming
+                        .entry(agent_id.to_string())
+                        .or_insert_with(|| snapshot_for(agent_id))
+                        .text
+                        .push_str(text);
                 }
                 EventKind::ReasoningDelta { text } => {
                     streaming
@@ -301,10 +318,19 @@ impl Session {
         if !transient {
             log.seq += 1;
         }
-        let event = Event { seq: log.seq, ts: Utc::now(), agent_id: agent_id.to_string(), kind };
+        let event = Event {
+            seq: log.seq,
+            ts: Utc::now(),
+            agent_id: agent_id.to_string(),
+            kind,
+        };
         if !transient {
             if log.file.is_none() {
-                log.file = std::fs::OpenOptions::new().create(true).append(true).open(self.dir.join("events.jsonl")).ok();
+                log.file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(self.dir.join("events.jsonl"))
+                    .ok();
             }
             if let (Some(file), Ok(mut line)) = (log.file.as_mut(), serde_json::to_string(&event)) {
                 line.push('\n');
@@ -431,8 +457,15 @@ impl Session {
             },
             _ = cancel.cancelled() => ApprovalOutcome::Cancelled,
         };
-        if matches!(outcome, ApprovalOutcome::Cancelled) && self.approvals.lock().unwrap().remove(&request_id).is_some() {
-            self.emit(agent_id, EventKind::ApprovalResolved { request_id, decision: ApprovalDecision::Deny });
+        if matches!(outcome, ApprovalOutcome::Cancelled) && self.approvals.lock().unwrap().remove(&request_id).is_some()
+        {
+            self.emit(
+                agent_id,
+                EventKind::ApprovalResolved {
+                    request_id,
+                    decision: ApprovalDecision::Deny,
+                },
+            );
         }
         // Other agents of the session may still be waiting for an answer.
         if self.approvals.lock().unwrap().is_empty() && self.run.lock().unwrap().is_some() {
@@ -456,7 +489,13 @@ impl Session {
                 .map(|event| event.agent_id.clone())
                 .unwrap_or_else(|| ROOT_AGENT.to_string())
         };
-        self.emit(&agent_id, EventKind::ApprovalResolved { request_id: request_id.to_string(), decision });
+        self.emit(
+            &agent_id,
+            EventKind::ApprovalResolved {
+                request_id: request_id.to_string(),
+                decision,
+            },
+        );
         let _ = tx.send((decision, feedback));
         true
     }
@@ -474,7 +513,10 @@ impl Session {
 }
 
 fn snapshot_for(agent_id: &str) -> StreamingSnapshot {
-    StreamingSnapshot { agent_id: agent_id.to_string(), ..Default::default() }
+    StreamingSnapshot {
+        agent_id: agent_id.to_string(),
+        ..Default::default()
+    }
 }
 
 pub(crate) fn short_id() -> String {
@@ -514,7 +556,9 @@ impl SessionManager {
         let mut index = HashMap::new();
         for entry in std::fs::read_dir(paths.sessions_dir())?.flatten() {
             let meta_file = entry.path().join("meta.json");
-            let Ok(text) = std::fs::read_to_string(&meta_file) else { continue };
+            let Ok(text) = std::fs::read_to_string(&meta_file) else {
+                continue;
+            };
             let mut meta: SessionMeta = match serde_json::from_str(&text) {
                 Ok(meta) => meta,
                 Err(err) => {
@@ -574,7 +618,7 @@ impl SessionManager {
     /// All sessions, most recently active first.
     pub fn list(&self) -> Vec<SessionMeta> {
         let mut sessions: Vec<SessionMeta> = self.inner.index.lock().unwrap().values().cloned().collect();
-        sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        sessions.sort_by_key(|session| std::cmp::Reverse(session.updated_at));
         sessions
     }
 
@@ -586,7 +630,9 @@ impl SessionManager {
                 // A deleted session must not reappear through a late save.
                 if index.contains_key(&meta.id) {
                     index.insert(meta.id.clone(), meta.clone());
-                    let _ = inner.global.send(GlobalEvent::SessionUpdated { session: meta.clone() });
+                    let _ = inner.global.send(GlobalEvent::SessionUpdated {
+                        session: Box::new(meta.clone()),
+                    });
                 }
             }
         })
@@ -598,7 +644,10 @@ impl SessionManager {
             .canonicalize()
             .map_err(|_| SessionError::Invalid(format!("workspace `{}` does not exist", request.workspace)))?;
         if !workspace.is_dir() {
-            return Err(SessionError::Invalid(format!("workspace `{}` is not a directory", workspace.display())));
+            return Err(SessionError::Invalid(format!(
+                "workspace `{}` is not a directory",
+                workspace.display()
+            )));
         }
         let config = self.config();
         let engine = request.engine.unwrap_or_default();
@@ -626,7 +675,10 @@ impl SessionManager {
         let now = Utc::now();
         let meta = SessionMeta {
             id: short_id(),
-            title: request.title.filter(|t| !t.trim().is_empty()).unwrap_or_else(|| DEFAULT_TITLE.to_string()),
+            title: request
+                .title
+                .filter(|t| !t.trim().is_empty())
+                .unwrap_or_else(|| DEFAULT_TITLE.to_string()),
             workspace: workspace.to_string_lossy().into_owned(),
             engine,
             provider,
@@ -672,7 +724,11 @@ impl SessionManager {
             .and_then(|text| serde_json::from_str(&text).ok())
             .unwrap_or_default();
         let events = std::fs::read_to_string(dir.join("events.jsonl"))
-            .map(|text| text.lines().filter_map(|line| serde_json::from_str(line).ok()).collect())
+            .map(|text| {
+                text.lines()
+                    .filter_map(|line| serde_json::from_str(line).ok())
+                    .collect()
+            })
             .unwrap_or_default();
         let session = Session::new(dir, meta, state, events, self.notifier());
         // Another caller may have loaded it in the meantime; keep one instance.
@@ -687,13 +743,13 @@ impl SessionManager {
             if let Some(title) = update.title.filter(|t| !t.trim().is_empty()) {
                 meta.title = title.trim().to_string();
             }
-            if meta.engine == Engine::Native {
-                if let Some(provider) = update.provider {
-                    if provider != meta.provider {
-                        meta.context_window = None;
-                    }
-                    meta.provider = provider;
+            if meta.engine == Engine::Native
+                && let Some(provider) = update.provider
+            {
+                if provider != meta.provider {
+                    meta.context_window = None;
                 }
+                meta.provider = provider;
             }
             if let Some(model) = update.model {
                 if model != meta.model {
@@ -730,7 +786,10 @@ impl SessionManager {
             let workspace = session.workspace();
             tokio::spawn(async move { worktree::remove_all(&workspace, &worktrees).await });
         }
-        let _ = self.inner.global.send(GlobalEvent::SessionDeleted { id: id.to_string() });
+        let _ = self
+            .inner
+            .global
+            .send(GlobalEvent::SessionDeleted { id: id.to_string() });
         Ok(())
     }
 
@@ -826,12 +885,19 @@ fn repair_history(messages: &mut Vec<Message>) {
         })
         .collect();
     if !results.is_empty() {
-        messages.push(Message { role: Role::User, content: results });
+        messages.push(Message {
+            role: Role::User,
+            content: results,
+        });
     }
 }
 
 fn title_from(text: &str) -> String {
-    let line = text.lines().map(str::trim).find(|line| !line.is_empty() && !line.starts_with('!')).unwrap_or("Session");
+    let line = text
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !line.starts_with('!'))
+        .unwrap_or("Session");
     let mut title: String = line.chars().take(60).collect();
     if line.chars().count() > 60 {
         title.push('…');
@@ -850,10 +916,26 @@ async fn run_turn(inner: &Arc<ManagerInner>, session: &Arc<Session>, input: User
     let meta = session.meta();
     let usage_before = meta.usage;
     session.set_status(SessionStatus::Running, None);
-    session.emit(ROOT_AGENT, EventKind::UserMessage { text: input.text.clone(), images: input.images.clone() });
-    session.emit(ROOT_AGENT, EventKind::TurnStarted { provider: meta.provider.clone(), model: meta.model.clone() });
+    session.emit(
+        ROOT_AGENT,
+        EventKind::UserMessage {
+            text: input.text.clone(),
+            images: input.images.clone(),
+        },
+    );
+    session.emit(
+        ROOT_AGENT,
+        EventKind::TurnStarted {
+            provider: meta.provider.clone(),
+            model: meta.model.clone(),
+        },
+    );
 
-    let env = Env { manager: inner.clone(), session: session.clone(), cancel: cancel.clone() };
+    let env = Env {
+        manager: inner.clone(),
+        session: session.clone(),
+        cancel: cancel.clone(),
+    };
     let (outcome, error) = if meta.engine == Engine::Native {
         run_native_turn(&env, &meta, &mut conversation, input).await
     } else {
@@ -863,17 +945,30 @@ async fn run_turn(inner: &Arc<ManagerInner>, session: &Arc<Session>, input: User
     // Whatever was still waiting for an answer is moot now.
     let pending: Vec<String> = session.approvals.lock().unwrap().drain().map(|(id, _)| id).collect();
     for request_id in pending {
-        session.emit(ROOT_AGENT, EventKind::ApprovalResolved { request_id, decision: ApprovalDecision::Deny });
+        session.emit(
+            ROOT_AGENT,
+            EventKind::ApprovalResolved {
+                request_id,
+                decision: ApprovalDecision::Deny,
+            },
+        );
     }
     session.emit(
         ROOT_AGENT,
-        EventKind::TurnFinished { outcome, usage: usage_since(&session.meta().usage, &usage_before) },
+        EventKind::TurnFinished {
+            outcome,
+            usage: usage_since(&session.meta().usage, &usage_before),
+        },
     );
     match outcome {
         TurnOutcome::Error => session.set_status(SessionStatus::Error, error),
         _ => session.set_status(SessionStatus::Idle, None),
     }
-    session.save_state(&conversation.system_prompt, &conversation.messages, conversation.announced_mode);
+    session.save_state(
+        &conversation.system_prompt,
+        &conversation.messages,
+        conversation.announced_mode,
+    );
 }
 
 async fn run_native_turn(
@@ -884,7 +979,12 @@ async fn run_native_turn(
 ) -> (TurnOutcome, Option<String>) {
     let session = &env.session;
     let fail = |message: String| {
-        session.emit(ROOT_AGENT, EventKind::Error { message: message.clone() });
+        session.emit(
+            ROOT_AGENT,
+            EventKind::Error {
+                message: message.clone(),
+            },
+        );
         (TurnOutcome::Error, Some(message))
     };
     let provider = match env.manager.registry.get(&meta.provider) {
@@ -938,13 +1038,19 @@ async fn run_native_turn(
     let mut blocks = Vec::new();
     if conversation.announced_mode != Some(meta.mode) {
         // The mode can change between turns; the system prompt cannot.
-        blocks.push(ContentBlock::text(format!("<system-notice>\n{}\n</system-notice>", prompt::mode_notice(meta.mode))));
+        blocks.push(ContentBlock::text(format!(
+            "<system-notice>\n{}\n</system-notice>",
+            prompt::mode_notice(meta.mode)
+        )));
         conversation.announced_mode = Some(meta.mode);
     }
     blocks.extend(input.into_blocks());
     match conversation.messages.last_mut() {
         Some(last) if last.role == Role::User => last.content.extend(blocks),
-        _ => conversation.messages.push(Message { role: Role::User, content: blocks }),
+        _ => conversation.messages.push(Message {
+            role: Role::User,
+            content: blocks,
+        }),
     }
 
     let mut messages = std::mem::take(&mut conversation.messages);
@@ -968,7 +1074,9 @@ pub(crate) async fn context_window(env: &Env, provider: &str, model: &str) -> Op
     if !matches!(listing, Ok(Ok(_))) {
         return None;
     }
-    registry.cached_model(provider, model).and_then(|info| info.context_window)
+    registry
+        .cached_model(provider, model)
+        .and_then(|info| info.context_window)
 }
 
 /// Compaction threshold: the configured budget, but never more than 80% of
@@ -1008,7 +1116,9 @@ mod tests {
         ];
         repair_history(&mut messages);
         assert_eq!(messages.len(), 3);
-        assert!(matches!(&messages[2].content[0], ContentBlock::ToolResult { tool_call_id, is_error: true, .. } if tool_call_id == "c1"));
+        assert!(
+            matches!(&messages[2].content[0], ContentBlock::ToolResult { tool_call_id, is_error: true, .. } if tool_call_id == "c1")
+        );
         repair_history(&mut messages);
         assert_eq!(messages.len(), 3, "a complete history is left alone");
     }
