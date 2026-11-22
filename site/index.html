@@ -1,0 +1,1079 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SWE Agent: an autonomous software engineer for any model</title>
+    <meta
+      name="description"
+      content="SWE Agent reads the code, plans, edits, runs and verifies, alone or as an orchestrator leading parallel sub-agents. Written in Rust, with a web UI. Works with Claude, GPT, Gemini, OpenRouter and local models."
+    />
+    <meta property="og:title" content="SWE Agent" />
+    <meta property="og:description" content="An autonomous software engineer for any model. Rust core, web UI, parallel sub-agents." />
+    <meta property="og:image" content="assets/poster.png" />
+    <meta name="color-scheme" content="dark" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2315171c'/%3E%3Cpath d='M9 12l5 4-5 4M16.5 21h6.5' fill='none' stroke='%237cc4ff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"
+    />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #08090c;
+        --surface: #101319;
+        --surface-2: #161a22;
+        --border: #222834;
+        --border-strong: #323a4a;
+        --text: #eceef2;
+        --text-2: #a9b1bf;
+        --text-3: #717b8c;
+        --accent: #7cc4ff;
+        --accent-2: #b79cff;
+        --green: #5fd09a;
+        --yellow: #e3b341;
+        --font: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        --mono: ui-monospace, 'SF Mono', 'JetBrains Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 16px/1.6 var(--font);
+        -webkit-font-smoothing: antialiased;
+        overflow-x: hidden;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      code,
+      pre {
+        font-family: var(--mono);
+      }
+
+      .wrap {
+        width: 100%;
+        max-width: 1160px;
+        margin: 0 auto;
+        padding: 0 24px;
+      }
+
+      /* ---------- nav ---------- */
+
+      nav {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        backdrop-filter: blur(14px);
+        background: rgba(8, 9, 12, 0.72);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      }
+
+      nav .wrap {
+        display: flex;
+        align-items: center;
+        gap: 28px;
+        height: 60px;
+      }
+
+      .logo {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 650;
+        letter-spacing: -0.01em;
+      }
+
+      .logo-mark {
+        display: grid;
+        place-items: center;
+        width: 28px;
+        height: 28px;
+        border-radius: 8px;
+        background: rgba(124, 196, 255, 0.13);
+        color: var(--accent);
+      }
+
+      .nav-links {
+        display: flex;
+        gap: 22px;
+        margin-left: auto;
+        color: var(--text-2);
+        font-size: 14.5px;
+      }
+
+      .nav-links a:hover {
+        color: var(--text);
+      }
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 42px;
+        padding: 0 18px;
+        border-radius: 10px;
+        border: 1px solid var(--border-strong);
+        background: var(--surface-2);
+        font-weight: 600;
+        font-size: 15px;
+        transition:
+          transform 0.12s,
+          border-color 0.12s,
+          background 0.12s;
+      }
+
+      .button:hover {
+        transform: translateY(-1px);
+        border-color: #4a556b;
+      }
+
+      .button.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #06121d;
+      }
+
+      .button.primary:hover {
+        background: #9bd2ff;
+        border-color: #9bd2ff;
+      }
+
+      .button.small {
+        height: 34px;
+        padding: 0 13px;
+        font-size: 14px;
+        border-radius: 8px;
+      }
+
+      /* ---------- hero ---------- */
+
+      .hero {
+        position: relative;
+        padding: 96px 0 40px;
+        text-align: center;
+      }
+
+      .hero::before {
+        content: '';
+        position: absolute;
+        inset: -200px 0 auto;
+        height: 760px;
+        background:
+          radial-gradient(600px 320px at 50% 38%, rgba(124, 196, 255, 0.16), transparent 70%),
+          radial-gradient(520px 300px at 68% 30%, rgba(183, 156, 255, 0.12), transparent 70%);
+        pointer-events: none;
+      }
+
+      .hero > .wrap {
+        position: relative;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 13px;
+        border: 1px solid var(--border-strong);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.03);
+        color: var(--text-2);
+        font-size: 13.5px;
+      }
+
+      .eyebrow b {
+        color: var(--accent);
+        font-weight: 600;
+      }
+
+      h1 {
+        margin: 26px auto 0;
+        max-width: 880px;
+        font-size: clamp(40px, 6.4vw, 76px);
+        line-height: 1.03;
+        letter-spacing: -0.045em;
+        font-weight: 720;
+      }
+
+      h1 span {
+        background: linear-gradient(92deg, var(--accent), var(--accent-2));
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+
+      .sub {
+        max-width: 700px;
+        margin: 24px auto 0;
+        color: var(--text-2);
+        font-size: clamp(17px, 1.9vw, 20px);
+        line-height: 1.55;
+      }
+
+      .cta {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 12px;
+        margin-top: 34px;
+      }
+
+      .models {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 8px;
+        margin-top: 34px;
+        color: var(--text-3);
+        font-size: 13.5px;
+      }
+
+      .models span {
+        padding: 4px 11px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: var(--surface);
+        color: var(--text-2);
+      }
+
+      /* ---------- demo ---------- */
+
+      .demo {
+        padding: 36px 0 30px;
+      }
+
+      .window {
+        position: relative;
+        border: 1px solid var(--border-strong);
+        border-radius: 14px;
+        background: #0d0f12;
+        overflow: hidden;
+        box-shadow:
+          0 40px 120px rgba(0, 0, 0, 0.7),
+          0 0 0 1px rgba(255, 255, 255, 0.03),
+          0 0 140px rgba(124, 196, 255, 0.09);
+      }
+
+      .window-bar {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        height: 38px;
+        padding: 0 14px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+      }
+
+      .window-bar i {
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        background: #2c3340;
+      }
+
+      .window-bar span {
+        margin: 0 auto;
+        padding-right: 54px;
+        color: var(--text-3);
+        font: 12.5px var(--mono);
+      }
+
+      .window video,
+      .window img {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+
+      .caption {
+        max-width: 760px;
+        margin: 18px auto 0;
+        color: var(--text-3);
+        font-size: 13.5px;
+        text-align: center;
+      }
+
+      /* ---------- sections ---------- */
+
+      section {
+        padding: 84px 0;
+      }
+
+      .kicker {
+        color: var(--accent);
+        font-size: 13.5px;
+        font-weight: 650;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h2 {
+        margin: 12px 0 0;
+        max-width: 780px;
+        font-size: clamp(30px, 3.6vw, 44px);
+        line-height: 1.1;
+        letter-spacing: -0.03em;
+        font-weight: 700;
+      }
+
+      .lede {
+        max-width: 700px;
+        margin: 18px 0 0;
+        color: var(--text-2);
+        font-size: 18px;
+      }
+
+      .grid {
+        display: grid;
+        gap: 16px;
+        margin-top: 44px;
+      }
+
+      .grid.three {
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      }
+
+      .grid.four {
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      }
+
+      .card {
+        padding: 24px;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: linear-gradient(180deg, var(--surface), rgba(16, 19, 25, 0.6));
+        transition:
+          border-color 0.15s,
+          transform 0.15s;
+      }
+
+      .card:hover {
+        border-color: var(--border-strong);
+        transform: translateY(-2px);
+      }
+
+      .card-icon {
+        display: grid;
+        place-items: center;
+        width: 38px;
+        height: 38px;
+        margin-bottom: 16px;
+        border-radius: 10px;
+        background: rgba(124, 196, 255, 0.1);
+        color: var(--accent);
+      }
+
+      .card h3 {
+        margin: 0 0 8px;
+        font-size: 17.5px;
+        font-weight: 650;
+        letter-spacing: -0.01em;
+      }
+
+      .card p {
+        margin: 0;
+        color: var(--text-2);
+        font-size: 15px;
+        line-height: 1.6;
+      }
+
+      .card code {
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.06);
+        font-size: 13px;
+      }
+
+      /* ---------- showcase ---------- */
+
+      .show {
+        display: grid;
+        grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.25fr);
+        gap: 44px;
+        align-items: center;
+        margin-top: 64px;
+      }
+
+      .show.flip {
+        grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.8fr);
+      }
+
+      .show.flip > :first-child {
+        order: 2;
+      }
+
+      .show h3 {
+        margin: 0 0 12px;
+        font-size: 26px;
+        line-height: 1.2;
+        letter-spacing: -0.02em;
+      }
+
+      .show p {
+        margin: 0 0 14px;
+        color: var(--text-2);
+      }
+
+      .show ul {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        color: var(--text-2);
+        font-size: 15.5px;
+      }
+
+      .show li {
+        position: relative;
+        padding: 5px 0 5px 26px;
+      }
+
+      .show li::before {
+        content: '';
+        position: absolute;
+        left: 4px;
+        top: 14px;
+        width: 9px;
+        height: 5px;
+        border-left: 2px solid var(--green);
+        border-bottom: 2px solid var(--green);
+        transform: rotate(-45deg);
+      }
+
+      .shot {
+        border: 1px solid var(--border-strong);
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+      }
+
+      .shot img {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+
+      /* ---------- architecture ---------- */
+
+      .arch {
+        margin-top: 44px;
+        padding: 28px;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        background: var(--surface);
+        overflow-x: auto;
+      }
+
+      .arch svg {
+        display: block;
+        min-width: 820px;
+        width: 100%;
+        height: auto;
+      }
+
+      /* ---------- quickstart ---------- */
+
+      .terminal {
+        margin-top: 36px;
+        border: 1px solid var(--border-strong);
+        border-radius: 14px;
+        background: #0a0c0f;
+        overflow: hidden;
+      }
+
+      .terminal pre {
+        margin: 0;
+        padding: 22px 24px;
+        overflow-x: auto;
+        font-size: 14px;
+        line-height: 1.75;
+        color: var(--text-2);
+      }
+
+      .terminal .c {
+        color: var(--text-3);
+      }
+
+      .terminal .p {
+        color: var(--green);
+        user-select: none;
+      }
+
+      .terminal b {
+        color: var(--text);
+        font-weight: 500;
+      }
+
+      /* ---------- roadmap ---------- */
+
+      .roadmap {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(255px, 1fr));
+        gap: 16px;
+        margin-top: 44px;
+      }
+
+      .phase {
+        padding: 24px;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: var(--surface);
+      }
+
+      .phase.now {
+        border-color: rgba(95, 208, 154, 0.45);
+        background: linear-gradient(180deg, rgba(95, 208, 154, 0.07), var(--surface) 55%);
+      }
+
+      .phase.next {
+        border-color: rgba(124, 196, 255, 0.4);
+      }
+
+      .phase-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        padding: 3px 10px;
+        border-radius: 999px;
+        font-size: 12.5px;
+        font-weight: 650;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--text-2);
+      }
+
+      .phase.now .phase-tag {
+        background: rgba(95, 208, 154, 0.14);
+        color: var(--green);
+      }
+
+      .phase.next .phase-tag {
+        background: rgba(124, 196, 255, 0.14);
+        color: var(--accent);
+      }
+
+      .phase h3 {
+        margin: 14px 0 4px;
+        font-size: 19px;
+        letter-spacing: -0.01em;
+      }
+
+      .phase > p {
+        margin: 0 0 14px;
+        color: var(--text-3);
+        font-size: 14px;
+      }
+
+      .phase ul {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        font-size: 14.5px;
+        color: var(--text-2);
+      }
+
+      .phase li {
+        position: relative;
+        padding: 5px 0 5px 22px;
+        line-height: 1.5;
+      }
+
+      .phase li::before {
+        content: '';
+        position: absolute;
+        left: 2px;
+        top: 12px;
+        width: 9px;
+        height: 9px;
+        border: 1.6px solid var(--border-strong);
+        border-radius: 50%;
+      }
+
+      .phase.now li::before {
+        border-color: var(--green);
+        background: var(--green);
+      }
+
+      /* ---------- status and footer ---------- */
+
+      .status {
+        margin-top: 36px;
+        padding: 26px 28px;
+        border: 1px solid rgba(227, 179, 65, 0.35);
+        border-radius: 14px;
+        background: rgba(227, 179, 65, 0.05);
+      }
+
+      .status h3 {
+        margin: 0 0 8px;
+        font-size: 17px;
+        color: var(--yellow);
+      }
+
+      .status p {
+        margin: 0;
+        color: var(--text-2);
+        font-size: 15.5px;
+      }
+
+      footer {
+        padding: 44px 0 60px;
+        border-top: 1px solid var(--border);
+        color: var(--text-3);
+        font-size: 14px;
+      }
+
+      footer .wrap {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 14px;
+      }
+
+      footer a:hover {
+        color: var(--text);
+      }
+
+      @media (max-width: 860px) {
+        .nav-links a:not(.button) {
+          display: none;
+        }
+        .hero {
+          padding-top: 64px;
+        }
+        section {
+          padding: 60px 0;
+        }
+        .show,
+        .show.flip {
+          grid-template-columns: 1fr;
+          gap: 22px;
+        }
+        .show.flip > :first-child {
+          order: 0;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+        * {
+          transition: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <nav>
+      <div class="wrap">
+        <a class="logo" href="#top">
+          <span class="logo-mark">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 17l6-6-6-6M12 19h8" />
+            </svg>
+          </span>
+          SWE Agent
+        </a>
+        <div class="nav-links">
+          <a href="#features">Features</a>
+          <a href="#how">How it works</a>
+          <a href="#start">Get started</a>
+          <a href="#roadmap">Roadmap</a>
+        </div>
+        <a class="button small" href="https://github.com/Cosmic-Game-studios/SWE_Agent">GitHub</a>
+      </div>
+    </nav>
+
+    <header class="hero" id="top">
+      <div class="wrap">
+        <span class="eyebrow"><b>v0.1</b> written in Rust, runs on your machine</span>
+        <h1>Hand it the task. <span>It ships the change.</span></h1>
+        <p class="sub">
+          SWE Agent is an autonomous software engineer for your own machine. It reads the code, plans, edits, runs and verifies, alone or
+          as an orchestrator leading parallel sub-agents, on whichever model you choose.
+        </p>
+        <div class="cta">
+          <a class="button primary" href="#start">Get started</a>
+          <a class="button" href="https://github.com/Cosmic-Game-studios/SWE_Agent">View the source</a>
+        </div>
+        <div class="models">
+          <span>Claude</span><span>GPT</span><span>Gemini</span><span>OpenRouter</span><span>Ollama and other local models</span>
+          <span>any OpenAI-compatible endpoint</span>
+        </div>
+      </div>
+    </header>
+
+    <div class="demo">
+      <div class="wrap">
+        <div class="window">
+          <div class="window-bar"><i></i><i></i><i></i><span>localhost:4477</span></div>
+          <video autoplay muted loop playsinline controls preload="metadata" poster="assets/poster.png">
+            <source src="assets/demo.webm" type="video/webm" />
+            <source src="assets/demo.mp4" type="video/mp4" />
+          </video>
+        </div>
+        <p class="caption">
+          Recorded from the real app, one minute, uncut. The agent loop, tools, approvals, sub-agents, git worktrees and the merge are
+          real; the model's turns are scripted by the built-in offline demo model, so the recording needs no API key.
+        </p>
+      </div>
+    </div>
+
+    <section id="features">
+      <div class="wrap">
+        <div class="kicker">What it does</div>
+        <h2>The whole job, from the request to a verified result.</h2>
+        <p class="lede">
+          Not autocomplete and not a chat window. An agent with real tools, a plan, and the persistence to keep going until the work
+          builds and the tests pass.
+        </p>
+
+        <div class="grid three">
+          <div class="card">
+            <div class="card-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" /></svg>
+            </div>
+            <h3>Any model, one agent</h3>
+            <p>
+              Native adapters for the Anthropic, OpenAI and Gemini APIs and for OpenRouter, plus every OpenAI-compatible endpoint. Model
+              lists come live from the provider. Switch models in the middle of a session.
+            </p>
+          </div>
+          <div class="card">
+            <div class="card-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM9 9h6v6H9zM9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3" /></svg>
+            </div>
+            <h3>Orchestrator and sub-agents</h3>
+            <p>
+              A lead agent plans, hands independent pieces to sub-agents that run in parallel, each in its own git worktree, then merges,
+              runs the full suite and has a reviewer check the result.
+            </p>
+          </div>
+          <div class="card">
+            <div class="card-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0zM12 6v6l4 2" /></svg>
+            </div>
+            <h3>Built for long runs</h3>
+            <p>
+              Sessions run in the server, not in your browser tab. Close the UI and come back hours later. When the context fills up, the
+              history is compacted into a hand-over summary and the work continues.
+            </p>
+          </div>
+          <div class="card">
+            <div class="card-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
+            </div>
+            <h3>You decide how much it may do</h3>
+            <p>
+              Four modes from read-only planning to full autonomy. Edits and commands wait for approval when you want them to, with
+              "always allow" rules per command, path or host.
+            </p>
+          </div>
+          <div class="card">
+            <div class="card-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17l6-6-6-6M12 19h8" /></svg>
+            </div>
+            <h3>Real tools</h3>
+            <p>
+              Read, write and edit files, search with glob and regex, run commands in the foreground or keep servers running in the
+              background, fetch documentation, and plug in anything else through MCP.
+            </p>
+          </div>
+          <div class="card">
+            <div class="card-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" /></svg>
+            </div>
+            <h3>Your keys, your machine</h3>
+            <p>
+              Bring your own API key; it stays on your computer and goes to nobody but the provider. Prefer the login of your installed
+              <code>claude</code> or <code>codex</code> tool? Run a session on that instead.
+            </p>
+          </div>
+        </div>
+
+        <div class="show">
+          <div>
+            <h3>Stay in control without babysitting.</h3>
+            <p>Every action is visible as it happens: the plan, each file diff, each command and its output.</p>
+            <ul>
+              <li>Approve a command once, or allow that kind of command for the rest of the session</li>
+              <li>Send instructions while the agent is working; it picks them up at its next step</li>
+              <li>Stop at any moment; the conversation stays consistent and can continue</li>
+              <li>Review everything that changed as one diff against the last commit</li>
+            </ul>
+          </div>
+          <div class="shot"><img src="assets/approval.png" alt="The agent asks for approval before running the test suite" loading="lazy" width="2880" height="1800" /></div>
+        </div>
+
+        <div class="show flip">
+          <div>
+            <h3>Parallel agents, one result.</h3>
+            <p>The orchestrator keeps its own context for decisions and lets workers do the reading, typing and testing.</p>
+            <ul>
+              <li>Explore, implementation and review agents with tool sets that fit the role</li>
+              <li>Isolated git worktrees, so parallel edits cannot collide</li>
+              <li>Each sub-agent's work is nested under the call that started it</li>
+              <li>A cheaper, faster model can be used for delegated work</li>
+            </ul>
+          </div>
+          <div class="shot"><img src="assets/parallel-agents.png" alt="Two sub-agents implement features in parallel worktrees" loading="lazy" width="2880" height="1800" /></div>
+        </div>
+
+        <div class="show">
+          <div>
+            <h3>Every agent on one board.</h3>
+            <p>Run several sessions across several projects and see at a glance which one is working and which one needs you.</p>
+            <ul>
+              <li>Sessions are grouped by workspace and survive a restart</li>
+              <li>The tab title tells you when an agent is waiting for an approval</li>
+              <li>The same server also runs headless: <code>swe run "fix the failing tests"</code></li>
+            </ul>
+          </div>
+          <div class="shot"><img src="assets/board.png" alt="A board with all sessions and their status" loading="lazy" width="2880" height="1800" /></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="how">
+      <div class="wrap">
+        <div class="kicker">How it works</div>
+        <h2>A small Rust core with clear seams.</h2>
+        <p class="lede">
+          Memory safety and predictable performance where it matters: one static binary runs the agent loop, the tools, the server and
+          the embedded UI. No runtime to install, no daemon to manage.
+        </p>
+        <div class="arch">
+          <svg viewBox="0 0 1040 430" role="img" aria-label="Architecture: the web UI and CLI talk to the server, which drives the agent core; the core uses provider adapters, built-in tools, MCP servers and vendor CLIs.">
+            <defs>
+              <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0 0L10 5L0 10z" fill="#4b566b" />
+              </marker>
+            </defs>
+            <g font-family="ui-sans-serif, system-ui, sans-serif" font-size="14">
+              <!-- clients -->
+              <rect x="20" y="24" width="210" height="64" rx="12" fill="#161a22" stroke="#323a4a" />
+              <text x="125" y="52" text-anchor="middle" fill="#eceef2" font-weight="600">Web UI</text>
+              <text x="125" y="72" text-anchor="middle" fill="#717b8c" font-size="12.5">React, embedded in the binary</text>
+              <rect x="20" y="110" width="210" height="64" rx="12" fill="#161a22" stroke="#323a4a" />
+              <text x="125" y="138" text-anchor="middle" fill="#eceef2" font-weight="600">swe run</text>
+              <text x="125" y="158" text-anchor="middle" fill="#717b8c" font-size="12.5">headless, scripts and CI</text>
+
+              <!-- server -->
+              <rect x="300" y="24" width="210" height="150" rx="12" fill="#101319" stroke="#3a6d96" />
+              <text x="405" y="54" text-anchor="middle" fill="#7cc4ff" font-weight="650">swe-server</text>
+              <text x="405" y="84" text-anchor="middle" fill="#a9b1bf" font-size="13">JSON API</text>
+              <text x="405" y="106" text-anchor="middle" fill="#a9b1bf" font-size="13">event stream with replay</text>
+              <text x="405" y="128" text-anchor="middle" fill="#a9b1bf" font-size="13">loopback, origin and</text>
+              <text x="405" y="148" text-anchor="middle" fill="#a9b1bf" font-size="13">token checks</text>
+
+              <!-- core -->
+              <rect x="580" y="24" width="440" height="150" rx="12" fill="#101319" stroke="#3a6d96" />
+              <text x="800" y="54" text-anchor="middle" fill="#7cc4ff" font-weight="650">swe-core</text>
+              <g fill="#161a22" stroke="#323a4a">
+                <rect x="598" y="70" width="128" height="40" rx="8" />
+                <rect x="736" y="70" width="128" height="40" rx="8" />
+                <rect x="874" y="70" width="128" height="40" rx="8" />
+                <rect x="598" y="120" width="128" height="40" rx="8" />
+                <rect x="736" y="120" width="128" height="40" rx="8" />
+                <rect x="874" y="120" width="128" height="40" rx="8" />
+              </g>
+              <g fill="#eceef2" font-size="13" text-anchor="middle">
+                <text x="662" y="95">agent loop</text>
+                <text x="800" y="95">sessions</text>
+                <text x="938" y="95">permissions</text>
+                <text x="662" y="145">sub-agents</text>
+                <text x="800" y="145">compaction</text>
+                <text x="938" y="145">worktrees</text>
+              </g>
+
+              <!-- bottom row -->
+              <rect x="300" y="262" width="330" height="144" rx="12" fill="#101319" stroke="#323a4a" />
+              <text x="465" y="292" text-anchor="middle" fill="#b79cff" font-weight="650">swe-llm</text>
+              <g fill="#161a22" stroke="#323a4a">
+                <rect x="318" y="308" width="142" height="36" rx="8" />
+                <rect x="470" y="308" width="142" height="36" rx="8" />
+                <rect x="318" y="354" width="142" height="36" rx="8" />
+                <rect x="470" y="354" width="142" height="36" rx="8" />
+              </g>
+              <g fill="#eceef2" font-size="12.5" text-anchor="middle">
+                <text x="389" y="331">Anthropic Messages</text>
+                <text x="541" y="331">OpenAI Responses</text>
+                <text x="389" y="377">Gemini</text>
+                <text x="541" y="377">OpenAI-compatible</text>
+              </g>
+
+              <rect x="650" y="262" width="176" height="144" rx="12" fill="#101319" stroke="#323a4a" />
+              <text x="738" y="292" text-anchor="middle" fill="#5fd09a" font-weight="650">swe-tools</text>
+              <g fill="#a9b1bf" font-size="13" text-anchor="middle">
+                <text x="738" y="322">files and edits</text>
+                <text x="738" y="344">glob and grep</text>
+                <text x="738" y="366">shell, background jobs</text>
+                <text x="738" y="388">web fetch</text>
+              </g>
+
+              <rect x="846" y="262" width="174" height="64" rx="12" fill="#101319" stroke="#323a4a" />
+              <text x="933" y="290" text-anchor="middle" fill="#eceef2" font-weight="600">MCP servers</text>
+              <text x="933" y="310" text-anchor="middle" fill="#717b8c" font-size="12.5">any external tool</text>
+              <rect x="846" y="342" width="174" height="64" rx="12" fill="#101319" stroke="#323a4a" />
+              <text x="933" y="370" text-anchor="middle" fill="#eceef2" font-weight="600">claude / codex</text>
+              <text x="933" y="390" text-anchor="middle" fill="#717b8c" font-size="12.5">your own installed tool</text>
+
+              <!-- arrows -->
+              <g stroke="#4b566b" stroke-width="1.6" fill="none" marker-end="url(#arrow)" marker-start="url(#arrow)">
+                <path d="M230 56H300" />
+                <path d="M510 99H580" />
+              </g>
+              <g stroke="#4b566b" stroke-width="1.6" fill="none" marker-end="url(#arrow)">
+                <path d="M230 142H264V118H300" />
+                <path d="M690 174V218H465V262" />
+                <path d="M760 174V262" />
+                <path d="M900 174V262" />
+                <path d="M960 174V234H1032V374H1020" />
+              </g>
+            </g>
+          </svg>
+        </div>
+
+        <div class="grid four">
+          <div class="card">
+            <h3>Append-only by design</h3>
+            <p>Histories are never rewritten between compactions, so provider prompt caches stay warm and reasoning stays valid across tool calls.</p>
+          </div>
+          <div class="card">
+            <h3>Reasoning round trips</h3>
+            <p>Thinking blocks, encrypted reasoning items and thought signatures are stored raw and replayed exactly to the API that produced them.</p>
+          </div>
+          <div class="card">
+            <h3>Events are the truth</h3>
+            <p>Each session is an append-only event log. Clients replay from the last sequence number they saw; nothing is lost on reconnect.</p>
+          </div>
+          <div class="card">
+            <h3>Guarded by default</h3>
+            <p>The server listens on loopback only and rejects foreign hosts and origins. Any other interface requires an access token.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="start">
+      <div class="wrap">
+        <div class="kicker">Get started</div>
+        <h2>From clone to a working agent in a few minutes.</h2>
+        <p class="lede">You need Rust, Node.js and an API key from any supported provider. No key at hand? Demo mode shows how everything works, offline.</p>
+        <div class="terminal">
+          <pre><span class="c"># build the UI and the binary</span>
+<span class="p">$</span> <b>git clone https://github.com/Cosmic-Game-studios/SWE_Agent && cd SWE_Agent</b>
+<span class="p">$</span> <b>npm --prefix ui ci && npm --prefix ui run build</b>
+<span class="p">$</span> <b>cargo build --release</b>
+
+<span class="c"># start the UI in your project (opens http://127.0.0.1:4477)</span>
+<span class="p">$</span> <b>export ANTHROPIC_API_KEY=...</b>   <span class="c"># or OPENAI_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY</span>
+<span class="p">$</span> <b>cd ~/my-project && swe</b>
+
+<span class="c"># or run one task without the UI</span>
+<span class="p">$</span> <b>swe run --provider anthropic --model claude-opus-5-5 --mode auto-edit "fix the failing tests"</b>
+
+<span class="c"># no key yet: try the offline demo model</span>
+<span class="p">$</span> <b>SWE_AGENT_DEMO=1 swe</b></pre>
+        </div>
+      </div>
+    </section>
+
+    <section id="roadmap">
+      <div class="wrap">
+        <div class="kicker">Roadmap</div>
+        <h2>Where this is going.</h2>
+        <p class="lede">
+          The goal is an agent you can hand real engineering work to and trust with the result. This is the order we plan to get there.
+        </p>
+        <div class="roadmap">
+          <div class="phase now">
+            <span class="phase-tag">Shipped</span>
+            <h3>0.1 Foundation</h3>
+            <p>In the repository today.</p>
+            <ul>
+              <li>Adapters for Anthropic, OpenAI, Gemini, OpenRouter and OpenAI-compatible endpoints</li>
+              <li>Agent loop with streaming, retries, parallel tools, cancellation and steering</li>
+              <li>File, search, shell and web tools; MCP client</li>
+              <li>Four permission modes with approvals and standing rules</li>
+              <li>Durable sessions, restart recovery, context compaction</li>
+              <li>Sub-agents, git worktree isolation, orchestrator profile</li>
+              <li>Web UI, headless CLI, vendor CLI engines</li>
+            </ul>
+          </div>
+          <div class="phase next">
+            <span class="phase-tag">Next</span>
+            <h3>0.2 Trust</h3>
+            <p>Prove it on real work and make it safe to leave alone.</p>
+            <ul>
+              <li>Validation runs against every provider with real keys</li>
+              <li>Published benchmark results on public coding benchmarks</li>
+              <li>OS-level sandbox for commands (Landlock, Seatbelt)</li>
+              <li>Checkpoints: rewind files and conversation to any step</li>
+              <li>Git in the UI: commit, branch and open pull requests</li>
+              <li>Desktop app and prebuilt binaries for Linux, macOS, Windows</li>
+              <li>Cost tracking with per-model pricing and budgets</li>
+            </ul>
+          </div>
+          <div class="phase">
+            <span class="phase-tag">Then</span>
+            <h3>0.3 Reach</h3>
+            <p>More of what an engineer actually does.</p>
+            <ul>
+              <li>Browser tool to run and test web apps, with screenshots as input</li>
+              <li>Web search and image results from tools</li>
+              <li>Project memory that persists across sessions</li>
+              <li>Skills and hooks to teach it your workflows</li>
+              <li>Scheduled and recurring jobs for unattended work</li>
+              <li>Review loops and budgets for orchestrated runs</li>
+            </ul>
+          </div>
+          <div class="phase">
+            <span class="phase-tag">Later</span>
+            <h3>1.0 Team</h3>
+            <p>From a personal tool to shared infrastructure.</p>
+            <ul>
+              <li>Remote runners and containers for isolated, long jobs</li>
+              <li>Issue and pull request integrations that start agents</li>
+              <li>Shared sessions and audit logs for teams</li>
+              <li>Editor extensions</li>
+              <li>Stable plugin interface</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="status">
+          <h3>Where it stands today</h3>
+          <p>
+            Version 0.1 is an early release. The provider adapters are tested against local servers that replay each provider's wire
+            format, and the agent loop, tools, sessions and UI are covered end to end with the scripted demo model. Runs against the live
+            APIs with real keys, and benchmark numbers, are the first item on the roadmap and have not been published yet. Treat it as a
+            capable preview, not a finished product.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <div class="wrap">
+        <span>SWE Agent. Built by Cosmic Game Studios.</span>
+        <span>
+          <a href="https://github.com/Cosmic-Game-studios/SWE_Agent">Source</a> ·
+          <a href="https://github.com/Cosmic-Game-studios/SWE_Agent/issues">Issues</a> · <a href="#top">Back to top</a>
+        </span>
+      </div>
+    </footer>
+  </body>
+</html>

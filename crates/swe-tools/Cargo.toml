@@ -4,7 +4,7 @@ description = "Built-in tools for SWE Agent: files, search, shell, web"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
+publish.workspace = true
 
 [dependencies]
 swe-protocol.workspace = true

@@ -4,7 +4,7 @@ description = "HTTP API, live event streams and embedded web UI for SWE Agent"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
+publish.workspace = true
 
 [dependencies]
 swe-protocol.workspace = true

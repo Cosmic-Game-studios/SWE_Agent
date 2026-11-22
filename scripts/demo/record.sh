@@ -56,7 +56,10 @@ stop_server
 # H.264 plays everywhere; VP9 is the smaller alternative for browsers that take it.
 ffmpeg -y -loglevel error -i "$raw" -an -c:v libx264 -preset slow -crf 24 -pix_fmt yuv420p -movflags +faststart "$out/demo.mp4"
 ffmpeg -y -loglevel error -i "$raw" -an -c:v libvpx-vp9 -crf 36 -b:v 0 -row-mt 1 "$out/demo.webm"
-cp "$work"/*.png "$out/"
+# Only the screenshots the project page and the README use.
+for shot in approval parallel-agents board orchestrated; do
+  cp "$work/$shot.png" "$out/"
+done
 cp "$out/parallel-agents.png" "$out/poster.png"
 
 echo "wrote:"; ls -la "$out"
