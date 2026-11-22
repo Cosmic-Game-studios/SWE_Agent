@@ -65,21 +65,30 @@ pub enum Engine {
     /// SWE Agent's own loop, talking to a provider API with the user's key.
     #[default]
     Native,
-    /// Anthropic's `claude` CLI, driven as a subprocess.
-    ClaudeCode,
-    /// OpenAI's `codex` CLI, driven as a subprocess.
-    Codex,
-    /// Google's `gemini` CLI, driven as a subprocess.
-    GeminiCli,
+    /// The user's own installed `claude` command line tool, run as a subprocess.
+    ClaudeCli,
+    /// The user's own installed `codex` command line tool, run as a subprocess.
+    CodexCli,
 }
 
 impl Engine {
     pub fn as_str(&self) -> &'static str {
         match self {
             Engine::Native => "native",
-            Engine::ClaudeCode => "claude-code",
-            Engine::Codex => "codex",
-            Engine::GeminiCli => "gemini-cli",
+            Engine::ClaudeCli => "claude-cli",
+            Engine::CodexCli => "codex-cli",
+        }
+    }
+}
+
+impl std::str::FromStr for Engine {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "native" => Ok(Engine::Native),
+            "claude-cli" | "claude" => Ok(Engine::ClaudeCli),
+            "codex-cli" | "codex" => Ok(Engine::CodexCli),
+            other => Err(format!("unknown engine `{other}` (expected native|claude-cli|codex-cli)")),
         }
     }
 }
@@ -388,6 +397,7 @@ mod tests {
         assert_eq!("full_auto".parse::<PermissionMode>().unwrap(), PermissionMode::FullAuto);
         assert_eq!("auto-edit".parse::<PermissionMode>().unwrap(), PermissionMode::AutoEdit);
         assert!("nope".parse::<PermissionMode>().is_err());
-        assert_eq!(serde_json::to_value(Engine::ClaudeCode).unwrap(), json!("claude-code"));
+        assert_eq!(serde_json::to_value(Engine::ClaudeCli).unwrap(), json!("claude-cli"));
+        assert_eq!("codex".parse::<Engine>().unwrap(), Engine::CodexCli);
     }
 }

@@ -16,7 +16,8 @@ pub mod session;
 mod subagent;
 mod worktree;
 
-pub use config::{Config, KeyStatus, Paths, ProviderConfig, ProviderInfo, ProviderRegistry};
+pub use config::{Config, DEMO_PROVIDER, KeyStatus, Paths, ProviderConfig, ProviderInfo, ProviderRegistry};
+pub use external::{EngineInfo, engines};
 pub use session::{
     CreateSession, GlobalEvent, Session, SessionError, SessionManager, SessionSnapshot, UpdateSession, UserInput,
 };

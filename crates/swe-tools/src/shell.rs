@@ -59,8 +59,17 @@ fn shell_command(command: &str, cwd: &Path) -> Command {
     cmd
 }
 
+/// Put a command into its own process group, so [`kill_tree`] can stop
+/// everything it starts. No-op on platforms without process groups.
+pub fn own_process_group(command: &mut Command) {
+    #[cfg(unix)]
+    command.process_group(0);
+    #[cfg(not(unix))]
+    let _ = command;
+}
+
 /// Terminate a command and everything it started.
-fn kill_tree(child: &mut Child) {
+pub fn kill_tree(child: &mut Child) {
     #[cfg(unix)]
     if let Some(pid) = child.id() {
         // SAFETY: plain syscall on a process group we created ourselves.

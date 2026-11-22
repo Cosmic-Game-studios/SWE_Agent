@@ -253,6 +253,19 @@ impl Session {
         self.meta.lock().unwrap().usage.add(usage);
     }
 
+    /// Remember the vendor CLI's own conversation id, to resume it next turn.
+    pub(crate) fn set_external_session_id(&self, id: String) {
+        let changed = {
+            let mut meta = self.meta.lock().unwrap();
+            let changed = meta.external_session_id.as_deref() != Some(id.as_str());
+            meta.external_session_id = Some(id);
+            changed
+        };
+        if changed {
+            self.save_meta();
+        }
+    }
+
     pub(crate) fn set_context_tokens(&self, tokens: u64) {
         self.meta.lock().unwrap().context_tokens = tokens;
     }
@@ -744,6 +757,11 @@ impl SessionManager {
     pub fn cancel(&self, id: &str) -> Result<(), SessionError> {
         self.get(id)?.cancel();
         Ok(())
+    }
+
+    /// State of the configured MCP servers (starts them if needed).
+    pub async fn mcp_status(&self) -> Vec<crate::mcp::McpServerStatus> {
+        self.inner.mcp.status().await
     }
 
     /// Stop every background process of every session (on shutdown).
