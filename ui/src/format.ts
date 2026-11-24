@@ -69,3 +69,6 @@ export const OUTCOME_LABEL: Record<TurnOutcome, string> = {
   refusal: 'Declined by the model',
   step_limit: 'Step limit reached',
 };
+
+/** Label of the platform's shortcut modifier key. */
+export const MOD_KEY = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';

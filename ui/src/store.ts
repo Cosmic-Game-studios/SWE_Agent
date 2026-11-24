@@ -33,6 +33,8 @@ export interface AppState {
   connected: boolean;
   route: Route;
   toast: { id: number; text: string; kind: 'error' | 'info' } | null;
+  /** The session whose deletion is waiting for confirmation. */
+  pendingDelete: SessionMeta | null;
 }
 
 function parseRoute(): Route {
@@ -53,6 +55,7 @@ let state: AppState = {
   connected: true,
   route: parseRoute(),
   toast: null,
+  pendingDelete: null,
 };
 
 const listeners = new Set<() => void>();
@@ -189,8 +192,15 @@ export async function updateSession(
   upsertSession(await api.updateSession(id, patch));
 }
 
+/** Ask the user to confirm deleting a session; the dialog lives in `App`. */
+export function requestDelete(session: SessionMeta | null): void {
+  set({ pendingDelete: session });
+}
+
 export async function deleteSession(id: string): Promise<void> {
+  const title = state.sessions.find((session) => session.id === id)?.title;
   await api.deleteSession(id);
+  toast(title ? `Deleted “${title}”` : 'Session deleted', 'info');
   set({ sessions: state.sessions.filter((session) => session.id !== id) });
   if (state.route.page === 'session' && state.route.id === id) navigate({ page: 'home' });
 }

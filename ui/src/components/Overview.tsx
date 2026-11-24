@@ -4,32 +4,43 @@
 import { useEffect, useState } from 'react';
 
 import type { SessionMeta } from '../api';
-import { STATUS_LABEL, baseName, formatTokens, modeLabel, relativeTime } from '../format';
-import { useApp } from '../store';
+import { MOD_KEY, STATUS_LABEL, baseName, formatTokens, modeLabel, relativeTime } from '../format';
+import { requestDelete, useApp } from '../store';
 import { StatusMark } from './Sidebar';
-import { Button, Icon } from './ui';
+import { Button, Icon, Kbd } from './ui';
 
 function SessionCard({ session }: { session: SessionMeta }) {
   return (
-    <a className={`card card-${session.status}`} href={`#/s/${session.id}`}>
-      <div className="card-top">
-        <StatusMark status={session.status} />
-        <span className="card-status">{STATUS_LABEL[session.status]}</span>
-        <span className="card-time">{relativeTime(session.updated_at)}</span>
-      </div>
-      <div className="card-title">{session.title}</div>
-      {session.status === 'error' && session.error ? <div className="card-error">{session.error}</div> : null}
-      <div className="card-meta">
-        <span title={session.workspace}>
-          <Icon name="folder" size={11} /> {baseName(session.workspace)}
-        </span>
-        <span>{session.model || session.engine}</span>
-        <span>{modeLabel(session.mode)}</span>
-        {session.usage.input_tokens + session.usage.output_tokens > 0 ? (
-          <span>{formatTokens(session.usage.input_tokens + session.usage.output_tokens)} tokens</span>
-        ) : null}
-      </div>
-    </a>
+    <div className="card-wrap">
+      <a className={`card card-${session.status}`} href={`#/s/${session.id}`}>
+        <div className="card-top">
+          <StatusMark status={session.status} />
+          <span className="card-status">{STATUS_LABEL[session.status]}</span>
+          <span className="card-time">{relativeTime(session.updated_at)}</span>
+        </div>
+        <div className="card-title">{session.title}</div>
+        {session.status === 'error' && session.error ? <div className="card-error">{session.error}</div> : null}
+        <div className="card-meta">
+          <span title={session.workspace}>
+            <Icon name="folder" size={11} /> {baseName(session.workspace)}
+          </span>
+          <span>{session.model || session.engine}</span>
+          <span>{modeLabel(session.mode)}</span>
+          {session.usage.input_tokens + session.usage.output_tokens > 0 ? (
+            <span>{formatTokens(session.usage.input_tokens + session.usage.output_tokens)} tokens</span>
+          ) : null}
+        </div>
+      </a>
+      <button
+        type="button"
+        className="card-delete"
+        aria-label={`Delete ${session.title}`}
+        title="Delete session"
+        onClick={() => requestDelete(session)}
+      >
+        <Icon name="trash" size={13} />
+      </button>
+    </div>
   );
 }
 
@@ -92,10 +103,19 @@ export function Agents({ onNewSession }: { onNewSession: () => void }) {
   );
 }
 
-export function Home({ onNewSession, onOpenSettings }: { onNewSession: () => void; onOpenSettings: () => void }) {
+export function Home({
+  onNewSession,
+  onOpenSettings,
+  onOpenPalette,
+}: {
+  onNewSession: () => void;
+  onOpenSettings: () => void;
+  onOpenPalette: () => void;
+}) {
   const sessions = useApp((state) => state.sessions);
   const providers = useApp((state) => state.providers);
   const engines = useApp((state) => state.meta?.engines ?? []);
+  const version = useApp((state) => state.meta?.version);
   const hasProvider = providers.some((provider) => provider.key.source !== 'missing');
   const hasCli = engines.some((engine) => engine.id !== 'native' && engine.installed);
   const recent = sessions.slice(0, 6);
@@ -103,15 +123,26 @@ export function Home({ onNewSession, onOpenSettings }: { onNewSession: () => voi
     <main className="main">
       <div className="scroll">
         <div className="home">
+          <span className="eyebrow">
+            <span className="dot dot-completed" />
+            Running on this machine{version ? ` · v${version}` : ''}
+          </span>
           <h1>SWE Agent</h1>
           <p className="lead">
             An autonomous software engineer that works in your repositories with the model you choose: it reads the code, plans, edits,
             runs and verifies, on its own or as an orchestrator leading parallel sub-agents.
           </p>
           {hasProvider || hasCli ? (
-            <Button variant="primary" icon="plus" onClick={onNewSession}>
-              New session
-            </Button>
+            <div className="hero-actions">
+              <Button variant="primary" icon="plus" onClick={onNewSession}>
+                New session
+              </Button>
+              <button type="button" className="search-trigger hero-search" onClick={onOpenPalette}>
+                <Icon name="search" size={14} />
+                <span>Search sessions and commands</span>
+                <Kbd>{MOD_KEY} K</Kbd>
+              </button>
+            </div>
           ) : (
             <div className="steps">
               <div className="step">

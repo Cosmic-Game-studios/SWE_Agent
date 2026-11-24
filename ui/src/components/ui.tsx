@@ -59,6 +59,39 @@ export function Icon({ name, size = 16, className }: { name: IconName; size?: nu
   );
 }
 
+export function Kbd({ children }: { children: ReactNode }) {
+  return <kbd className="kbd">{children}</kbd>;
+}
+
+/** Copies text to the clipboard and confirms it with a check mark for a moment. */
+export function CopyButton({ text, label = 'Copy', className }: { text: string | (() => string); label?: string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(typeof text === 'function' ? text() : text);
+      setCopied(true);
+    } catch {
+      // Clipboard access can be denied (insecure origin, permissions); leave the icon unchanged.
+    }
+  };
+  return (
+    <button
+      type="button"
+      className={className ? `copy-button ${className}` : 'copy-button'}
+      aria-label={copied ? 'Copied' : label}
+      title={copied ? 'Copied' : label}
+      onClick={() => void copy()}
+    >
+      <Icon name={copied ? 'check' : 'copy'} size={13} className={copied ? 'ok' : undefined} />
+    </button>
+  );
+}
+
 export function Spinner({ size = 14 }: { size?: number }) {
   return <span className="spinner" style={{ width: size, height: size }} role="status" aria-label="Working" />;
 }
@@ -103,7 +136,7 @@ export function Dialog({
     window.addEventListener('keydown', onKey);
     const previous = document.activeElement as HTMLElement | null;
     // Focus the first field so the dialog is usable from the keyboard at once.
-    ref.current?.querySelector<HTMLElement>('input, select, textarea, button.btn-primary')?.focus();
+    ref.current?.querySelector<HTMLElement>('input, select, textarea, button.btn-primary, [data-autofocus]')?.focus();
     return () => {
       window.removeEventListener('keydown', onKey);
       previous?.focus?.();
@@ -165,26 +198,29 @@ export function Popover({
 
 /** Keeps a scroll container pinned to the bottom while the user is there. */
 export function useStickToBottom(dependency: unknown) {
-  const ref = useRef<HTMLDivElement>(null);
+  // The container is held in state, not a ref object: it mounts after the first
+  // render (the view shows a spinner while loading), and the listener must attach then.
+  const [element, setElement] = useState<HTMLDivElement | null>(null);
   const pinned = useRef(true);
+  const [atBottom, setAtBottom] = useState(true);
   useEffect(() => {
-    const element = ref.current;
     if (!element) return;
     const onScroll = () => {
       pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
+      setAtBottom(pinned.current);
     };
     element.addEventListener('scroll', onScroll, { passive: true });
     return () => element.removeEventListener('scroll', onScroll);
-  }, []);
+  }, [element]);
   useLayoutEffect(() => {
-    const element = ref.current;
     if (element && pinned.current) element.scrollTop = element.scrollHeight;
-  }, [dependency]);
+  }, [element, dependency]);
   return {
-    ref,
+    ref: setElement,
+    atBottom,
     scrollToBottom: () => {
       pinned.current = true;
-      const element = ref.current;
+      setAtBottom(true);
       if (element) element.scrollTop = element.scrollHeight;
     },
   };

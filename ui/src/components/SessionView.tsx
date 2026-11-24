@@ -3,11 +3,11 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { SessionMeta } from '../api';
 import { STATUS_LABEL, baseName } from '../format';
 import { ROOT, SessionStore, pendingApprovals } from '../session';
-import { attempt, deleteSession, updateSession, useApp } from '../store';
+import { attempt, requestDelete, updateSession, useApp } from '../store';
 import { Composer } from './Composer';
 import { type PanelTab, RightPanel } from './RightPanel';
 import { AgentTimeline } from './Timeline';
-import { Button, Icon, Spinner, useStickToBottom } from './ui';
+import { Button, Icon, Kbd, Spinner, useStickToBottom } from './ui';
 
 function useSessionStore(id: string): SessionStore {
   const store = useMemo(() => new SessionStore(id), [id]);
@@ -65,7 +65,7 @@ export function SessionView({ id, onOpenSettings }: { id: string; onOpenSettings
   const [tab, setTab] = useState<PanelTab>('changes');
   const view = store.view;
   const root = view.agents[ROOT];
-  const { ref, scrollToBottom } = useStickToBottom(store.version);
+  const { ref, atBottom, scrollToBottom } = useStickToBottom(store.version);
 
   const togglePanel = () => {
     setPanelOpen((open) => {
@@ -126,11 +126,7 @@ export function SessionView({ id, onOpenSettings }: { id: string; onOpenSettings
               icon="trash"
               aria-label="Delete session"
               title="Delete session"
-              onClick={() => {
-                if (window.confirm(`Delete “${meta.title}”? Its history is removed; files in the workspace are not touched.`)) {
-                  void attempt(() => deleteSession(meta.id));
-                }
-              }}
+              onClick={() => requestDelete(meta)}
             />
             <Button
               variant={panelOpen ? 'default' : 'ghost'}
@@ -180,7 +176,25 @@ export function SessionView({ id, onOpenSettings }: { id: string; onOpenSettings
 
         <div className="composer-wrap">
           <div className="column">
+            {atBottom ? null : (
+              <button type="button" className="jump-bottom" onClick={scrollToBottom}>
+                <Icon name="chevron-down" size={14} />
+                {running ? 'Follow the agent' : 'Jump to latest'}
+              </button>
+            )}
             <Composer meta={meta} store={store} running={running} onOpenSettings={onOpenSettings} onSent={scrollToBottom} />
+            <p className="composer-hint">
+              <span>
+                <Kbd>↵</Kbd> send
+              </span>
+              <span>
+                <Kbd>Shift</Kbd>
+                <Kbd>↵</Kbd> new line
+              </span>
+              <span>
+                <Kbd>/</Kbd> focus
+              </span>
+            </p>
           </div>
         </div>
       </main>

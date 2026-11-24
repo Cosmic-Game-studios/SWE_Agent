@@ -9,7 +9,7 @@ import { type AgentView, type Item, ROOT, type SessionView, type ToolView } from
 import { attempt } from '../store';
 import { DiffStat, InlineDiff } from './DiffView';
 import { Markdown } from './Markdown';
-import { Button, Icon, type IconName, Spinner } from './ui';
+import { Button, CopyButton, Icon, type IconName, Spinner } from './ui';
 
 function toolIcon(tool: ToolView): IconName {
   switch (tool.kind) {
@@ -143,9 +143,12 @@ function ToolBody({ tool, view, sessionId }: { tool: ToolView; view: SessionView
       ) : (
         <>
           {tool.kind === 'execute' && typeof tool.input.command === 'string' ? (
-            <pre className="command">
-              <span className="prompt">$</span> {tool.input.command}
-            </pre>
+            <div className="copyable">
+              <pre className="command">
+                <span className="prompt">$</span> {tool.input.command}
+              </pre>
+              <CopyButton text={tool.input.command} label="Copy command" className="copy-float" />
+            </div>
           ) : tool.kind === 'edit' && tool.status !== 'done' ? (
             <EditPreview tool={tool} />
           ) : Object.keys(tool.input).length && tool.kind !== 'read' ? (
