@@ -96,6 +96,29 @@ pub fn resolve_path(base: &Path, path: &str) -> PathBuf {
     out
 }
 
+/// Resolve `path` to an absolute path without symlinks, in the form programs expect.
+///
+/// On Windows `Path::canonicalize` returns a verbatim path (`\\?\C:\...`). cmd.exe
+/// refuses it as a working directory and falls back to the Windows directory, and
+/// it never compares equal to the ordinary `C:\...` paths a model writes.
+pub fn canonicalize(path: &Path) -> std::io::Result<PathBuf> {
+    path.canonicalize().map(|path| plain_path(&path))
+}
+
+/// Strip the Windows verbatim prefix from `path`; other paths are returned as they are.
+pub fn plain_path(path: &Path) -> PathBuf {
+    let Some(text) = path.to_str() else {
+        return path.to_path_buf();
+    };
+    if let Some(share) = text.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{share}"))
+    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+        PathBuf::from(rest)
+    } else {
+        path.to_path_buf()
+    }
+}
+
 /// Show `path` relative to `base` when it is inside it, absolute otherwise.
 pub fn display_path(base: &Path, path: &Path) -> String {
     match path.strip_prefix(base) {

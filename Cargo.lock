@@ -1935,6 +1935,7 @@ dependencies = [
  "swe-core",
  "swe-llm",
  "swe-protocol",
+ "swe-tools",
  "tempfile",
  "tokio",
  "tokio-stream",

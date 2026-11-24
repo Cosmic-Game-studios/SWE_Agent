@@ -55,8 +55,7 @@ pub async fn list_directories(Query(query): Query<FsQuery>) -> Result<Json<DirLi
         Some(path) => PathBuf::from(path),
         None => home_dir(),
     };
-    let path = requested
-        .canonicalize()
+    let path = swe_tools::canonicalize(&requested)
         .map_err(|_| ApiError::new(StatusCode::NOT_FOUND, format!("{} does not exist", requested.display())))?;
     if !path.is_dir() {
         return Err(ApiError::bad_request(format!("{} is not a directory", path.display())));

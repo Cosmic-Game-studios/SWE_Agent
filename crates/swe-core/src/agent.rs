@@ -107,6 +107,9 @@ pub(crate) async fn run_agent(
     let mut context_tokens = if is_root { session.meta().context_tokens } else { 0 };
     let mut continuations = 0u32;
     let mut steps = 0u32;
+    let mut nudged_after_empty = false;
+    // Calls that failed in the previous step, with how often in a row.
+    let mut failing: HashMap<String, u32> = HashMap::new();
 
     let finish = |outcome: TurnOutcome, usage: Usage, final_text: String, error: Option<String>| TurnResult {
         outcome,
@@ -195,7 +198,8 @@ pub(crate) async fn run_agent(
             session.set_context_tokens(context_tokens);
         }
         let text = completion.message.text();
-        if !text.trim().is_empty() {
+        let wrote_text = !text.trim().is_empty();
+        if wrote_text {
             final_text = text;
         }
         let calls: Vec<Call> = completion
@@ -281,16 +285,63 @@ pub(crate) async fn run_agent(
             if is_root && session.has_steering() {
                 continue;
             }
+            // Neither text nor tool calls: the model stalled. Ending here would look
+            // like a finished turn, so ask once before accepting it.
+            if !wrote_text && !nudged_after_empty {
+                nudged_after_empty = true;
+                history.push(Message::user_text(EMPTY_RESPONSE_NUDGE));
+                save(history);
+                continue;
+            }
             return finish(TurnOutcome::Completed, usage, final_text, None);
         }
 
-        let results = execute_tools(env, spec, &calls).await;
+        let mut results = execute_tools(env, spec, &calls).await;
+        note_repeated_failures(&calls, &mut results, &mut failing);
         history.push(Message {
             role: Role::User,
             content: results,
         });
         save(history);
     }
+}
+
+const EMPTY_RESPONSE_NUDGE: &str = "Your last response was empty. Continue the task, or state the result if \
+                                    you are done.";
+
+/// A call that fails this many times in a row with the same arguments gets a note.
+const REPEATED_FAILURE_LIMIT: u32 = 3;
+
+/// Tell the model when it keeps issuing a call that keeps failing, instead of
+/// letting it spend the rest of the step budget on it.
+///
+/// `failing` holds the calls that failed in the previous step; a call counts as
+/// repeated only when it fails in consecutive steps with identical arguments.
+fn note_repeated_failures(calls: &[Call], results: &mut [ContentBlock], failing: &mut HashMap<String, u32>) {
+    let mut still_failing = HashMap::new();
+    for block in results {
+        let ContentBlock::ToolResult {
+            tool_call_id,
+            content,
+            is_error: true,
+        } = block
+        else {
+            continue;
+        };
+        let Some(call) = calls.iter().find(|call| call.id == *tool_call_id) else {
+            continue;
+        };
+        let key = format!("{} {}", call.name, call.input);
+        let count = failing.get(&key).copied().unwrap_or(0) + 1;
+        if count >= REPEATED_FAILURE_LIMIT {
+            content.push_str(&format!(
+                "\n\n[This exact call has now failed {count} times in a row with the same arguments. Do not \
+                 repeat it: change the arguments, take a different approach, or explain what blocks you.]"
+            ));
+        }
+        still_failing.insert(key, count);
+    }
+    *failing = still_failing;
 }
 
 /// Fold user messages that arrived mid-turn into the conversation.

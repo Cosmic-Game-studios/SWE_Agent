@@ -6,9 +6,9 @@
 //! shell that started it.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -19,7 +19,7 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::{Child, Command};
 
 use crate::text::truncate_middle;
-use crate::{OutputSink, Tool, ToolContext, ToolOutput, arg_str, parse_input};
+use crate::{OutputSink, Tool, ToolContext, ToolOutput, arg_str, parse_input, plain_path};
 
 const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 const MAX_TIMEOUT_MS: u64 = 3_600_000;
@@ -28,27 +28,92 @@ const MAX_OUTPUT_BYTES: usize = 48_000;
 /// Background output retained between polls.
 const MAX_BACKGROUND_BUFFER: usize = 1_000_000;
 
-fn shell_command(command: &str, cwd: &Path) -> Command {
-    #[cfg(unix)]
-    let mut cmd = {
-        let shell = if Path::new("/bin/bash").exists() || Path::new("/usr/bin/bash").exists() {
+/// The shell that runs commands on this machine.
+struct Shell {
+    program: PathBuf,
+    /// Takes `-c <command>` and POSIX syntax; otherwise it is cmd.exe.
+    posix: bool,
+    /// What the model is told about it.
+    description: &'static str,
+}
+
+fn shell() -> &'static Shell {
+    static SHELL: OnceLock<Shell> = OnceLock::new();
+    SHELL.get_or_init(detect_shell)
+}
+
+#[cfg(unix)]
+fn detect_shell() -> Shell {
+    let bash = Path::new("/bin/bash").exists() || Path::new("/usr/bin/bash").exists();
+    Shell {
+        program: PathBuf::from(if bash { "bash" } else { "sh" }),
+        posix: true,
+        description: if bash {
             "bash"
         } else {
-            "sh"
-        };
-        let mut cmd = Command::new(shell);
+            "sh (POSIX shell, no bash extensions)"
+        },
+    }
+}
+
+#[cfg(not(unix))]
+fn detect_shell() -> Shell {
+    // Git for Windows ships a real bash, which is what models write for. A `bash.exe`
+    // found on PATH is not trusted: in System32 it is the WSL launcher, which runs
+    // in another file system.
+    let git_bash = ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"]
+        .into_iter()
+        .filter_map(std::env::var_os)
+        .flat_map(|root| {
+            let root = PathBuf::from(root);
+            [root.join(r"Git\bin\bash.exe"), root.join(r"Programs\Git\bin\bash.exe")]
+        })
+        .find(|candidate| candidate.is_file());
+    match git_bash {
+        Some(program) => Shell {
+            program,
+            posix: true,
+            description: "bash from Git for Windows (Unix commands and `/` paths work; Windows programs are on PATH)",
+        },
+        None => Shell {
+            program: PathBuf::from("cmd"),
+            posix: false,
+            description: "Windows cmd.exe, not bash (use `dir`, `type`, `set NAME=value` and `2>NUL`; \
+                          quote with double quotes only)",
+        },
+    }
+}
+
+/// The shell commands run in, described for the model.
+pub fn shell_description() -> &'static str {
+    shell().description
+}
+
+#[cfg(windows)]
+fn cmd_exe_arguments(cmd: &mut Command, command: &str) {
+    // cmd.exe does not understand the `\"` escaping that `arg` applies, so a quoted
+    // argument would reach the program mangled. With /S it strips exactly the outer
+    // pair of quotes and takes everything between them literally.
+    cmd.raw_arg("/D /S /C").raw_arg(format!("\"{command}\""));
+}
+
+#[cfg(not(windows))]
+fn cmd_exe_arguments(cmd: &mut Command, command: &str) {
+    cmd.arg("/C").arg(command);
+}
+
+fn shell_command(command: &str, cwd: &Path) -> Command {
+    let shell = shell();
+    let mut cmd = Command::new(&shell.program);
+    if shell.posix {
         cmd.arg("-c").arg(command);
-        // Own process group: lets us signal the whole tree.
-        cmd.process_group(0);
-        cmd
-    };
-    #[cfg(not(unix))]
-    let mut cmd = {
-        let mut cmd = Command::new("cmd");
-        cmd.arg("/C").arg(command);
-        cmd
-    };
-    cmd.current_dir(cwd)
+    } else {
+        cmd_exe_arguments(&mut cmd, command);
+    }
+    // Own process group: lets us signal the whole tree.
+    own_process_group(&mut cmd);
+    // A verbatim `\\?\` directory makes cmd.exe run in the Windows directory instead.
+    cmd.current_dir(plain_path(cwd))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -59,6 +124,9 @@ fn shell_command(command: &str, cwd: &Path) -> Command {
         .env("GIT_EDITOR", "true")
         .env("TERM", "dumb")
         .env("NO_COLOR", "1")
+        // Python otherwise writes the legacy code page into the pipe on Windows.
+        .env("PYTHONUTF8", "1")
+        .env("PYTHONIOENCODING", "utf-8")
         .kill_on_drop(true);
     cmd
 }
@@ -80,6 +148,17 @@ pub fn kill_tree(child: &mut Child) {
         unsafe {
             libc::killpg(pid as libc::pid_t, libc::SIGKILL);
         }
+    }
+    // Killing the shell alone would leave the build or server it started running,
+    // holding its locks and ports.
+    #[cfg(windows)]
+    if let Some(pid) = child.id() {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &pid.to_string()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
     }
     let _ = child.start_kill();
 }
@@ -313,13 +392,14 @@ impl Tool for Bash {
         format!(
             "Run a shell command in the working directory and return its combined stdout and stderr \
              with the exit code. Use it to build, test, run programs, use git and install \
-             dependencies. Each call starts a fresh shell: `cd` and exported variables do not carry \
+             dependencies. The shell on this machine is {}. Each call starts a fresh shell: `cd` and exported variables do not carry \
              over, so chain with `&&` or use absolute paths. The default timeout is {}s (maximum {}s); \
              pass `timeout_ms` for slow builds or test suites. Set `background` to true for commands \
              that keep running (dev servers, watchers): the call returns an id immediately, and \
              bash_output / kill_process manage the process. Commands run without a terminal, so \
              never start anything that waits for interactive input. Prefer read_file, edit_file, \
              glob and grep over cat, sed, find and grep in the shell.",
+            shell_description(),
             DEFAULT_TIMEOUT_MS / 1000,
             MAX_TIMEOUT_MS / 1000
         )
@@ -564,6 +644,72 @@ impl Tool for KillProcess {
             Ok(output) => ToolOutput::ok(output),
             Err(message) => ToolOutput::error(message),
         }
+    }
+}
+
+/// Behaviour that must hold in whichever shell the machine has, Windows included.
+#[cfg(test)]
+mod portable_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn quoted_arguments_reach_the_program_intact() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = Bash
+            .run(json!({"command": "echo \"a b\""}), &ToolContext::new(dir.path()))
+            .await;
+        assert!(!out.is_error, "{}", out.content);
+        assert!(out.content.contains("a b"), "{}", out.content);
+        assert!(
+            !out.content.contains('\\'),
+            "quotes must not arrive escaped: {}",
+            out.content
+        );
+    }
+
+    #[tokio::test]
+    async fn runs_in_a_canonical_working_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("marker.txt"), "x").unwrap();
+        // The raw canonical form: verbatim (`\\?\C:\...`) on Windows.
+        let cwd = dir.path().canonicalize().unwrap();
+        let list = if shell().posix { "ls" } else { "dir /b" };
+        let out = Bash.run(json!({"command": list}), &ToolContext::new(&cwd)).await;
+        assert!(!out.is_error, "{}", out.content);
+        assert!(out.content.contains("marker.txt"), "{}", out.content);
+    }
+
+    #[tokio::test]
+    async fn timeout_stops_the_command_it_started() {
+        let dir = tempfile::tempdir().unwrap();
+        let wait = if shell().posix {
+            "sleep 30"
+        } else {
+            "ping -n 30 127.0.0.1"
+        };
+        let started = Instant::now();
+        let out = Bash
+            .run(
+                json!({"command": wait, "timeout_ms": 1000}),
+                &ToolContext::new(dir.path()),
+            )
+            .await;
+        assert!(out.is_error);
+        assert!(out.content.contains("timed out after 1s"), "{}", out.content);
+        assert!(
+            started.elapsed() < Duration::from_secs(15),
+            "the command was not stopped"
+        );
+    }
+
+    #[test]
+    fn verbatim_prefixes_are_stripped() {
+        assert_eq!(plain_path(Path::new(r"\\?\C:\work\app")), Path::new(r"C:\work\app"));
+        assert_eq!(
+            plain_path(Path::new(r"\\?\UNC\host\share\app")),
+            Path::new(r"\\host\share\app")
+        );
+        assert_eq!(plain_path(Path::new("/home/me/app")), Path::new("/home/me/app"));
     }
 }
 

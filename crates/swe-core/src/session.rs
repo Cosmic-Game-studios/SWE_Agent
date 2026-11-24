@@ -640,8 +640,7 @@ impl SessionManager {
 
     pub fn create(&self, request: CreateSession) -> Result<SessionMeta, SessionError> {
         let workspace = PathBuf::from(&request.workspace);
-        let workspace = workspace
-            .canonicalize()
+        let workspace = swe_tools::canonicalize(&workspace)
             .map_err(|_| SessionError::Invalid(format!("workspace `{}` does not exist", request.workspace)))?;
         if !workspace.is_dir() {
             return Err(SessionError::Invalid(format!(

@@ -10,6 +10,7 @@ publish.workspace = true
 swe-protocol.workspace = true
 swe-llm.workspace = true
 swe-core.workspace = true
+swe-tools.workspace = true
 anyhow.workspace = true
 axum.workspace = true
 chrono.workspace = true

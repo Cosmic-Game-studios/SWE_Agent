@@ -131,6 +131,25 @@ impl Tool for ReadFile {
     }
 }
 
+/// Say where a failed `old_string` almost matched, so the model can correct the
+/// call without reading the whole file again.
+fn near_miss(file: &str, old_string: &str) -> String {
+    let Some(first) = old_string.lines().map(str::trim).find(|line| !line.is_empty()) else {
+        return "Read the file again to see its current content.".to_string();
+    };
+    match file.lines().enumerate().find(|(_, line)| line.trim() == first) {
+        Some((index, line)) => format!(
+            "Its first line matches line {} once leading and trailing whitespace is ignored, so the \
+             difference is in the whitespace or in the lines after it. That line in the file is:\n{}",
+            index + 1,
+            truncate_line(line, 300)
+        ),
+        None => "Its first line does not occur anywhere in the file. Read the file again to see its \
+                 current content."
+            .to_string(),
+    }
+}
+
 pub struct WriteFile;
 
 #[derive(Deserialize)]
@@ -286,12 +305,13 @@ impl Tool for EditFile {
             Err(output) => return output,
         };
 
-        // Models write `\n`; a file with CRLF line endings would never match.
-        let (old, new) = if !before.contains(&args.old_string) && before.contains("\r\n") {
-            (
-                args.old_string.replace("\r\n", "\n").replace('\n', "\r\n"),
-                args.new_string.replace("\r\n", "\n").replace('\n', "\r\n"),
-            )
+        // Models write `\n`. In a CRLF file that would never match, and a replacement
+        // written as it came would leave the file with mixed line endings.
+        let crlf = |text: &str| text.replace("\r\n", "\n").replace('\n', "\r\n");
+        let (old, new) = if before.contains("\r\n")
+            && (before.contains(&crlf(&args.old_string)) || !before.contains(&args.old_string))
+        {
+            (crlf(&args.old_string), crlf(&args.new_string))
         } else {
             (args.old_string.clone(), args.new_string.clone())
         };
@@ -299,14 +319,21 @@ impl Tool for EditFile {
         let occurrences = before.matches(&old).count();
         if occurrences == 0 {
             return ToolOutput::error(format!(
-                "old_string was not found in {shown}. It must match exactly, including whitespace. \
-                 Read the file again to see its current content."
+                "old_string was not found in {shown}. It must match exactly, including whitespace. {}",
+                near_miss(&before, &args.old_string)
             ));
         }
         if occurrences > 1 && !args.replace_all {
+            let lines: Vec<String> = before
+                .match_indices(&old)
+                .take(10)
+                .map(|(index, _)| (before[..index].matches('\n').count() + 1).to_string())
+                .collect();
             return ToolOutput::error(format!(
-                "old_string occurs {occurrences} times in {shown}. Add surrounding context to make it \
-                 unique, or set replace_all to true."
+                "old_string occurs {occurrences} times in {shown} (starting at line {}{}). Add surrounding \
+                 context to make it unique, or set replace_all to true.",
+                lines.join(", "),
+                if occurrences > lines.len() { ", ..." } else { "" }
             ));
         }
         let after = if args.replace_all {
@@ -546,6 +573,11 @@ mod tests {
             .await;
         assert!(ambiguous.is_error);
         assert!(ambiguous.content.contains("occurs 2 times"));
+        assert!(
+            ambiguous.content.contains("starting at line 1, 2"),
+            "{}",
+            ambiguous.content
+        );
         assert_eq!(
             fs::read_to_string(&file).unwrap(),
             "let a = 1;\nlet b = 1;\n",
@@ -556,6 +588,21 @@ mod tests {
             .run(json!({"path": "a.rs", "old_string": "nope", "new_string": "x"}), &ctx)
             .await;
         assert!(missing.content.contains("not found"));
+        assert!(
+            missing.content.contains("does not occur anywhere"),
+            "{}",
+            missing.content
+        );
+
+        // Wrong indentation is the usual reason; the error points at the line.
+        let indented = EditFile
+            .run(
+                json!({"path": "a.rs", "old_string": "    let b = 1;\nlet c", "new_string": "x"}),
+                &ctx,
+            )
+            .await;
+        assert!(indented.is_error);
+        assert!(indented.content.contains("matches line 2"), "{}", indented.content);
 
         let unique = EditFile
             .run(
@@ -589,6 +636,16 @@ mod tests {
             .await;
         assert!(!out.is_error, "{}", out.content);
         assert_eq!(fs::read_to_string(&file).unwrap(), "1\r\n2\r\nthird\r\n");
+
+        // A one-line old_string matches as it is; the new lines still get the file's endings.
+        let out = EditFile
+            .run(
+                json!({"path": "win.txt", "old_string": "third", "new_string": "3\n4"}),
+                &ctx(&dir),
+            )
+            .await;
+        assert!(!out.is_error, "{}", out.content);
+        assert_eq!(fs::read_to_string(&file).unwrap(), "1\r\n2\r\n3\r\n4\r\n");
     }
 
     #[tokio::test]

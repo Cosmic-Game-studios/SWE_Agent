@@ -241,9 +241,7 @@ async fn a_turn_runs_tools_until_the_model_is_done() {
     assert!(requests[0].system.contains("SWE Agent"));
     assert!(
         requests[0].system.contains(
-            &h.workspace
-                .path()
-                .canonicalize()
+            &swe_tools::canonicalize(h.workspace.path())
                 .unwrap()
                 .to_string_lossy()
                 .into_owned()
@@ -476,6 +474,67 @@ async fn parallel_calls_come_back_in_order_and_bad_calls_are_explained() {
         })
         .collect();
     assert_eq!(call_ids, result_ids);
+}
+
+#[tokio::test]
+async fn a_call_that_keeps_failing_is_called_out() {
+    let h = Harness::scripted();
+    let id = h.create(PermissionMode::FullAuto);
+    let read = "!tool read_file {\"path\": \"missing.txt\"}";
+    h.turn(
+        &id,
+        &format!("{read}\n!then\n{read}\n!then\n{read}\n!then\n!say giving up"),
+    )
+    .await;
+
+    let result_after = |request: usize| -> String {
+        let requests = h.requests();
+        requests[request]
+            .messages
+            .last()
+            .unwrap()
+            .content
+            .iter()
+            .find_map(|block| match block {
+                ContentBlock::ToolResult { content, .. } => Some(content.clone()),
+                _ => None,
+            })
+            .unwrap()
+    };
+    assert!(!result_after(2).contains("in a row"), "two failures are not a loop yet");
+    assert!(
+        result_after(3).contains("failed 3 times in a row"),
+        "{}",
+        result_after(3)
+    );
+}
+
+#[tokio::test]
+async fn an_empty_response_is_questioned_once_before_the_turn_ends() {
+    let empty = || MockReply::Message {
+        content: vec![],
+        stop_reason: None,
+        usage: None,
+    };
+    let h = Harness::new(MockProvider::scripted(vec![empty(), MockReply::text("All done.")]));
+    let id = h.create(PermissionMode::FullAuto);
+    let events = h.turn(&id, "do it").await;
+    assert_eq!(outcome(&events), TurnOutcome::Completed);
+    let requests = h.requests();
+    assert_eq!(requests.len(), 2);
+    let nudge = requests[1].messages.last().unwrap();
+    assert!(nudge.text().contains("Your last response was empty"));
+
+    // A model that stays silent ends the turn instead of looping.
+    let h = Harness::new(MockProvider::scripted(vec![
+        empty(),
+        empty(),
+        MockReply::text("never sent"),
+    ]));
+    let id = h.create(PermissionMode::FullAuto);
+    let events = h.turn(&id, "do it").await;
+    assert_eq!(outcome(&events), TurnOutcome::Completed);
+    assert_eq!(h.requests().len(), 2);
 }
 
 #[tokio::test]
