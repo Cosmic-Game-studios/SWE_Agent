@@ -1411,9 +1411,9 @@
           <details>
             <summary>Is it ready for serious work?</summary>
             <p>
-              It is an early release. The agent loop, tools, sessions and UI are tested end to end with a scripted model, and the provider
-              adapters against servers that replay each provider's wire format. Runs against the live APIs with real keys have not been
-              validated yet; that is the first item on the roadmap. Treat it as a capable preview.
+              It is an early release. The provider adapters have been validated against the live API of every built-in provider with
+              real keys, and the agent loop, tools, sessions and UI are tested end to end with a scripted model. Benchmark results have
+              not been published yet, and there is no operating-system sandbox. Treat it as a capable preview.
             </p>
           </details>
         </div>
@@ -1440,6 +1440,7 @@
               <li>Durable sessions, restart recovery, context compaction</li>
               <li>Sub-agents, git worktree isolation, orchestrator profile</li>
               <li>Web UI, headless CLI, vendor CLI engines</li>
+              <li>Validated against every provider's live API with real keys</li>
             </ul>
           </div>
           <div class="phase next">
@@ -1447,7 +1448,6 @@
             <h3>0.2 Trust</h3>
             <p>Prove it on real work and make it safe to leave alone.</p>
             <ul>
-              <li>Validation runs against every provider with real keys</li>
               <li>Published benchmark results on public coding benchmarks</li>
               <li>OS-level sandbox for commands (Landlock, Seatbelt)</li>
               <li>Checkpoints: rewind files and conversation to any step</li>
@@ -1486,10 +1486,10 @@
         <div class="status">
           <h3>Where it stands today</h3>
           <p>
-            Version 0.1 is an early release. The provider adapters are tested against local servers that replay each provider's wire
-            format, and the agent loop, tools, sessions and UI are covered end to end with the scripted demo model. Runs against the live
-            APIs with real keys, and benchmark numbers, are the first item on the roadmap and have not been published yet. Treat it as a
-            capable preview, not a finished product.
+            Version 0.1 is an early release. The provider adapters have been validated against the live API of every built-in provider
+            with real keys, and are tested against local servers that replay each provider's wire format. The agent loop, tools, sessions
+            and UI are covered end to end with the scripted demo model. Benchmark numbers are the next item on the roadmap and have not
+            been published yet. Treat it as a capable preview, not a finished product.
           </p>
         </div>
       </div>

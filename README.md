@@ -9,9 +9,9 @@ in Rust; a web UI is embedded in the binary.
 A one-minute recording of the UI is in [`site/assets/demo.mp4`](site/assets/demo.mp4), and the project page with the roadmap is
 in [`site/`](site/index.html).
 
-> **Status: early (0.1).** The provider adapters are tested against local servers that replay each provider's wire format, and
-> the agent loop, tools, sessions and UI are covered end to end with a scripted demo model. Runs against the live provider APIs
-> with real keys have not been done yet; that validation is the first item on the roadmap.
+> **Status: early (0.1).** The provider adapters have been validated against the live API of every built-in provider with real
+> keys, and are tested against local servers that replay each provider's wire format. The agent loop, tools, sessions and UI are
+> covered end to end with a scripted demo model. Benchmark results have not been published yet.
 
 ## What it does
 
@@ -190,8 +190,8 @@ recording come from `scripts/demo/scenarios.txt`; everything else is the real ap
 
 ## Roadmap
 
-1. **Trust (0.2):** validation against every provider with real keys, published benchmark results, an OS-level sandbox,
-   checkpoints and rewind, git actions in the UI, a desktop app and prebuilt binaries, cost tracking.
+1. **Trust (0.2):** published benchmark results, an OS-level sandbox, checkpoints and rewind, git actions in the UI, a desktop
+   app and prebuilt binaries, cost tracking.
 2. **Reach (0.3):** a browser tool, web search, images from tools, project memory, skills and hooks, scheduled jobs.
 3. **Team (1.0):** remote runners, issue and pull-request integrations, shared sessions, editor extensions.
 
