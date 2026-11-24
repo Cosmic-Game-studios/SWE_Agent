@@ -481,7 +481,287 @@
         height: auto;
       }
 
+      /* ---------- hero install line, facts ---------- */
+
+      .install {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        max-width: 100%;
+        margin-top: 22px;
+        padding: 7px 7px 7px 16px;
+        border: 1px solid var(--border-strong);
+        border-radius: 12px;
+        background: #0a0c0f;
+        font-family: var(--mono);
+        font-size: 14px;
+        text-align: left;
+      }
+
+      .install .p {
+        color: var(--green);
+        user-select: none;
+      }
+
+      .install code {
+        overflow-x: auto;
+        white-space: nowrap;
+        color: var(--text);
+        scrollbar-width: none;
+      }
+
+      .copy {
+        flex: none;
+        height: 30px;
+        padding: 0 12px;
+        border: 1px solid var(--border-strong);
+        border-radius: 8px;
+        background: var(--surface-2);
+        color: var(--text-2);
+        font: 600 12.5px/1 var(--font);
+        cursor: pointer;
+        transition:
+          color 0.15s,
+          border-color 0.15s;
+      }
+
+      .copy:hover {
+        color: var(--text);
+        border-color: var(--accent);
+      }
+
+      .copy.done {
+        color: var(--green);
+        border-color: var(--green);
+      }
+
+      .hero-note {
+        margin: 14px 0 0;
+        color: var(--text-3);
+        font-size: 14px;
+      }
+
+      .hero-note a {
+        color: var(--text-2);
+        text-decoration: underline;
+        text-underline-offset: 3px;
+      }
+
+      .facts {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        margin-top: 56px;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        background: var(--surface);
+        overflow: hidden;
+      }
+
+      .fact {
+        padding: 22px 24px;
+        border-left: 1px solid var(--border);
+      }
+
+      .fact:first-child {
+        border-left: 0;
+      }
+
+      .fact b {
+        display: block;
+        font-size: 30px;
+        font-weight: 700;
+        letter-spacing: -0.03em;
+        line-height: 1.1;
+      }
+
+      .fact span {
+        display: block;
+        margin-top: 6px;
+        color: var(--text-2);
+        font-size: 14.5px;
+        line-height: 1.45;
+      }
+
       /* ---------- quickstart ---------- */
+
+      .os-tabs {
+        display: inline-flex;
+        gap: 2px;
+        margin-top: 30px;
+        padding: 3px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--surface);
+      }
+
+      .os-tabs button {
+        height: 32px;
+        padding: 0 14px;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: var(--text-2);
+        font: 600 13.5px/1 var(--font);
+        cursor: pointer;
+      }
+
+      .os-tabs button[aria-selected='true'] {
+        background: var(--surface-2);
+        color: var(--text);
+        box-shadow: 0 0 0 1px var(--border-strong);
+      }
+
+      .steps {
+        display: grid;
+        gap: 18px;
+        margin: 22px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .step {
+        display: grid;
+        grid-template-columns: 300px minmax(0, 1fr);
+        gap: 28px;
+        align-items: start;
+        padding: 24px;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        background: var(--surface);
+      }
+
+      .step-n {
+        display: inline-grid;
+        place-items: center;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: rgba(124, 196, 255, 0.12);
+        color: var(--accent);
+        font-size: 13.5px;
+        font-weight: 700;
+      }
+
+      .step h3 {
+        margin: 14px 0 0;
+        font-size: 19px;
+        letter-spacing: -0.015em;
+      }
+
+      .step p {
+        margin: 8px 0 0;
+        color: var(--text-2);
+        font-size: 15px;
+      }
+
+      .step .terminal {
+        position: relative;
+        margin-top: 0;
+      }
+
+      .step .terminal pre {
+        padding: 18px 84px 18px 20px;
+      }
+
+      .step .terminal .copy {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+      }
+
+      /* ---------- questions ---------- */
+
+      .faq {
+        max-width: 860px;
+        margin-top: 36px;
+        border-top: 1px solid var(--border);
+      }
+
+      .faq details {
+        border-bottom: 1px solid var(--border);
+      }
+
+      .faq summary {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 20px 2px;
+        font-size: 17.5px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        cursor: pointer;
+        list-style: none;
+      }
+
+      .faq summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .faq summary::after {
+        content: '+';
+        flex: none;
+        color: var(--text-3);
+        font-size: 22px;
+        font-weight: 400;
+        line-height: 1;
+        transition: transform 0.2s;
+      }
+
+      .faq details[open] summary::after {
+        transform: rotate(45deg);
+      }
+
+      .faq summary:hover {
+        color: var(--accent);
+      }
+
+      .faq p {
+        margin: 0;
+        padding: 0 2px 22px;
+        max-width: 720px;
+        color: var(--text-2);
+      }
+
+      .faq code {
+        padding: 1px 6px;
+        border-radius: 5px;
+        background: var(--surface-2);
+        font-size: 0.88em;
+      }
+
+      /* ---------- closing call ---------- */
+
+      .closing {
+        position: relative;
+        padding: 64px 32px;
+        border: 1px solid var(--border-strong);
+        border-radius: 22px;
+        background:
+          radial-gradient(520px 240px at 50% 0%, rgba(124, 196, 255, 0.14), transparent 70%),
+          var(--surface);
+        text-align: center;
+        overflow: hidden;
+      }
+
+      .closing h2 {
+        margin: 0 auto;
+      }
+
+      .closing p {
+        max-width: 560px;
+        margin: 16px auto 0;
+        color: var(--text-2);
+        font-size: 18px;
+      }
+
+      a:focus-visible,
+      button:focus-visible,
+      summary:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 3px;
+        border-radius: 6px;
+      }
 
       .terminal {
         margin-top: 36px;
@@ -655,6 +935,32 @@
         section {
           padding: 60px 0;
         }
+        .facts {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .fact:nth-child(3) {
+          border-left: 0;
+        }
+        .fact:nth-child(n + 3) {
+          border-top: 1px solid var(--border);
+        }
+        .step {
+          grid-template-columns: 1fr;
+          gap: 16px;
+          padding: 18px;
+        }
+        /* Too narrow to keep the button beside the commands: it gets its own row. */
+        .step .terminal .copy {
+          position: static;
+          display: block;
+          margin: 10px 10px 0 auto;
+        }
+        .step .terminal pre {
+          padding: 10px 16px 16px;
+        }
+        .closing {
+          padding: 44px 20px;
+        }
         .show,
         .show.flip {
           grid-template-columns: 1fr;
@@ -690,6 +996,7 @@
           <a href="#features">Features</a>
           <a href="#how">How it works</a>
           <a href="#start">Get started</a>
+          <a href="#faq">Questions</a>
           <a href="#roadmap">Roadmap</a>
         </div>
         <a class="button small" href="https://github.com/Cosmic-Game-studios/SWE_Agent">GitHub</a>
@@ -708,6 +1015,12 @@
           <a class="button primary" href="#start">Get started</a>
           <a class="button" href="https://github.com/Cosmic-Game-studios/SWE_Agent">View the source</a>
         </div>
+        <div class="install">
+          <span class="p">$</span>
+          <code>git clone https://github.com/Cosmic-Game-studios/SWE_Agent</code>
+          <button type="button" class="copy" data-copy="git clone https://github.com/Cosmic-Game-studios/SWE_Agent">Copy</button>
+        </div>
+        <p class="hero-note">No API key yet? The <a href="#start">offline demo model</a> shows the whole loop without one.</p>
         <div class="models">
           <span>Claude</span><span>GPT</span><span>Gemini</span><span>OpenRouter</span><span>Ollama and other local models</span>
           <span>any OpenAI-compatible endpoint</span>
@@ -728,6 +1041,12 @@
           Recorded from the real app, one minute, uncut. The agent loop, tools, approvals, sub-agents, git worktrees and the merge are
           real; the model's turns are scripted by the built-in offline demo model, so the recording needs no API key.
         </p>
+        <div class="facts">
+          <div class="fact"><b>4</b><span>provider protocols built in, plus every OpenAI-compatible endpoint</span></div>
+          <div class="fact"><b>4</b><span>permission modes, from read-only planning to full autonomy</span></div>
+          <div class="fact"><b>3</b><span>kinds of sub-agents that work in parallel git worktrees</span></div>
+          <div class="fact"><b>1</b><span>binary with the server and the web UI inside</span></div>
+        </div>
       </div>
     </div>
 
@@ -972,21 +1291,131 @@
         <div class="kicker">Get started</div>
         <h2>From clone to a working agent in a few minutes.</h2>
         <p class="lede">You need Rust, Node.js and an API key from any supported provider. No key at hand? Demo mode shows how everything works, offline.</p>
-        <div class="terminal">
-          <pre><span class="c"># build the UI and the binary</span>
-<span class="p">$</span> <b>git clone https://github.com/Cosmic-Game-studios/SWE_Agent && cd SWE_Agent</b>
-<span class="p">$</span> <b>npm --prefix ui ci && npm --prefix ui run build</b>
+        <div class="os-tabs" role="tablist" aria-label="Operating system">
+          <button type="button" role="tab" data-os="unix" aria-selected="true">macOS / Linux</button>
+          <button type="button" role="tab" data-os="win" aria-selected="false">Windows</button>
+        </div>
+        <ol class="steps">
+          <li class="step">
+            <div>
+              <span class="step-n">1</span>
+              <h3>Build it</h3>
+              <p>
+                You need Rust 1.88 or newer, Node.js 22 or newer and git. The web UI is built first because it is embedded into the
+                binary.
+              </p>
+              <p data-os="win" hidden>
+                Clone into a short folder such as <code>C:\src</code>: the MSVC linker stops once build paths pass 260 characters.
+              </p>
+            </div>
+            <div class="terminal">
+              <button type="button" class="copy">Copy</button>
+              <pre data-os="unix"><span class="p">$</span> <b>git clone https://github.com/Cosmic-Game-studios/SWE_Agent &amp;&amp; cd SWE_Agent</b>
+<span class="p">$</span> <b>npm --prefix ui ci &amp;&amp; npm --prefix ui run build</b>
 <span class="p">$</span> <b>cargo build --release</b>
+<span class="c"># the binary is target/release/swe; put it on your PATH</span></pre>
+              <pre data-os="win" hidden><span class="p">&gt;</span> <b>git clone https://github.com/Cosmic-Game-studios/SWE_Agent; cd SWE_Agent</b>
+<span class="p">&gt;</span> <b>npm --prefix ui ci; npm --prefix ui run build</b>
+<span class="p">&gt;</span> <b>cargo build --release</b>
+<span class="c"># the binary is target\release\swe.exe; put it on your PATH</span></pre>
+            </div>
+          </li>
+          <li class="step">
+            <div>
+              <span class="step-n">2</span>
+              <h3>Start it in your project</h3>
+              <p>
+                Set a key for the provider you use and run <code>swe</code> in the folder the agent should work on. It serves the UI on
+                <code>127.0.0.1:4477</code> and opens your browser. Keys can also be entered in the UI under Settings.
+              </p>
+            </div>
+            <div class="terminal">
+              <button type="button" class="copy">Copy</button>
+              <pre data-os="unix"><span class="c"># or OPENAI_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY</span>
+<span class="p">$</span> <b>export ANTHROPIC_API_KEY=...</b>
+<span class="p">$</span> <b>cd ~/my-project &amp;&amp; swe</b></pre>
+              <pre data-os="win" hidden><span class="c"># or OPENAI_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY</span>
+<span class="p">&gt;</span> <b>$env:ANTHROPIC_API_KEY = "..."</b>
+<span class="p">&gt;</span> <b>cd C:\src\my-project; swe</b></pre>
+            </div>
+          </li>
+          <li class="step">
+            <div>
+              <span class="step-n">3</span>
+              <h3>No key yet? Use the demo model</h3>
+              <p>
+                Demo mode adds an offline, scripted model. It does no real work, but it shows the loop, the tools, the approvals and the
+                UI exactly as they behave with a real model.
+              </p>
+            </div>
+            <div class="terminal">
+              <button type="button" class="copy">Copy</button>
+              <pre data-os="unix"><span class="p">$</span> <b>SWE_AGENT_DEMO=1 swe</b></pre>
+              <pre data-os="win" hidden><span class="p">&gt;</span> <b>$env:SWE_AGENT_DEMO = "1"; swe</b></pre>
+            </div>
+          </li>
+          <li class="step">
+            <div>
+              <span class="step-n">4</span>
+              <h3>Or run one task without the UI</h3>
+              <p>The same agent runs headless for scripts and CI, and prints what it does. Add <code>--json</code> for machine-readable events.</p>
+            </div>
+            <div class="terminal">
+              <button type="button" class="copy">Copy</button>
+              <pre><span class="p">$</span> <b>swe run --provider anthropic --model claude-opus-5-5 --mode auto-edit "fix the failing tests"</b></pre>
+            </div>
+          </li>
+        </ol>
+      </div>
+    </section>
 
-<span class="c"># start the UI in your project (opens http://127.0.0.1:4477)</span>
-<span class="p">$</span> <b>export ANTHROPIC_API_KEY=...</b>   <span class="c"># or OPENAI_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY</span>
-<span class="p">$</span> <b>cd ~/my-project && swe</b>
-
-<span class="c"># or run one task without the UI</span>
-<span class="p">$</span> <b>swe run --provider anthropic --model claude-opus-5-5 --mode auto-edit "fix the failing tests"</b>
-
-<span class="c"># no key yet: try the offline demo model</span>
-<span class="p">$</span> <b>SWE_AGENT_DEMO=1 swe</b></pre>
+    <section id="faq">
+      <div class="wrap">
+        <div class="kicker">Questions</div>
+        <h2>What people ask before they try it.</h2>
+        <div class="faq">
+          <details open>
+            <summary>Do I need an API key?</summary>
+            <p>
+              Not to look around: the offline demo model needs none. For real work, use a key from Anthropic, OpenAI, Google or
+              OpenRouter, or point it at any OpenAI-compatible endpoint. Local models served by Ollama or LM Studio need no key at all. A
+              session can also run on the <code>claude</code> or <code>codex</code> command line tool you already have installed; whether
+              your plan covers that is defined by the vendor's terms.
+            </p>
+          </details>
+          <details>
+            <summary>What is the agent allowed to do on my machine?</summary>
+            <p>
+              What the permission mode allows. <code>plan</code> blocks edits, <code>ask</code> asks before every edit and command,
+              <code>auto-edit</code> edits inside the workspace and asks before commands, and <code>full-auto</code> does not ask. There is
+              no operating-system sandbox yet, so <code>full-auto</code> acts with your user's permissions: use it in a container or on
+              work you can throw away.
+            </p>
+          </details>
+          <details>
+            <summary>Where do my keys and my code go?</summary>
+            <p>
+              Keys are stored in <code>~/.swe-agent/credentials.json</code> and are sent only to the provider they belong to. A key from
+              the environment is never written to disk. Your code goes to the model provider you choose and nowhere else. The server
+              listens on loopback only and rejects requests with a foreign Host or Origin.
+            </p>
+          </details>
+          <details>
+            <summary>Can several agents work at the same time?</summary>
+            <p>
+              Yes. An agent can delegate to sub-agents that run in parallel, each in its own git worktree and on its own branch, so their
+              edits cannot collide. Sessions live in the server: they keep working when you close the tab and survive a restart, and one
+              board shows every agent across your projects.
+            </p>
+          </details>
+          <details>
+            <summary>Is it ready for serious work?</summary>
+            <p>
+              It is an early release. The agent loop, tools, sessions and UI are tested end to end with a scripted model, and the provider
+              adapters against servers that replay each provider's wire format. Runs against the live APIs with real keys have not been
+              validated yet; that is the first item on the roadmap. Treat it as a capable preview.
+            </p>
+          </details>
         </div>
       </div>
     </section>
@@ -1066,6 +1495,19 @@
       </div>
     </section>
 
+    <section>
+      <div class="wrap">
+        <div class="closing">
+          <h2>Try it on a repository you know.</h2>
+          <p>Give it a task you would hand to a colleague, and watch every step it takes.</p>
+          <div class="cta">
+            <a class="button primary" href="#start">Get started</a>
+            <a class="button" href="https://github.com/Cosmic-Game-studios/SWE_Agent">Star it on GitHub</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <footer>
       <div class="wrap">
         <span>SWE Agent. Built by Cosmic Game Studios.</span>
@@ -1075,5 +1517,38 @@
         </span>
       </div>
     </footer>
+
+    <script>
+      // Copy buttons: an explicit data-copy value, or the commands of the visible terminal next to the button.
+      for (const button of document.querySelectorAll('.copy')) {
+        button.addEventListener('click', async () => {
+          let text = button.dataset.copy;
+          if (!text) {
+            const pre = button.parentElement.querySelector('pre:not([hidden])');
+            text = Array.from(pre.querySelectorAll('b'), (line) => line.textContent).join('\n');
+          }
+          try {
+            await navigator.clipboard.writeText(text);
+          } catch {
+            return;
+          }
+          button.textContent = 'Copied';
+          button.classList.add('done');
+          setTimeout(() => {
+            button.textContent = 'Copy';
+            button.classList.remove('done');
+          }, 1500);
+        });
+      }
+
+      // Operating-system tabs. Windows visitors start on the Windows commands.
+      const tabs = document.querySelectorAll('.os-tabs [data-os]');
+      const selectOs = (os) => {
+        for (const tab of tabs) tab.setAttribute('aria-selected', String(tab.dataset.os === os));
+        for (const block of document.querySelectorAll('.steps [data-os]')) block.hidden = block.dataset.os !== os;
+      };
+      for (const tab of tabs) tab.addEventListener('click', () => selectOs(tab.dataset.os));
+      if (/Win/.test(navigator.platform)) selectOs('win');
+    </script>
   </body>
 </html>
