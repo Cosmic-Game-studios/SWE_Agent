@@ -6,6 +6,7 @@
 //! parallel, which is what makes orchestration worthwhile: the lead agent
 //! keeps its context for decisions while workers do the reading and typing.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -40,9 +41,7 @@ pub(crate) async fn root_tools(env: &Env, me: &AgentIdentity, config: &Config) -
         session: env.session.clone(),
         agent_id: me.agent_id.clone(),
     }));
-    for tool in env.manager.mcp.tools().await {
-        tools.add(tool);
-    }
+    add_mcp_tools(&mut tools, env, config).await;
     if me.depth < config.max_agent_depth {
         tools.add(Arc::new(TaskTool {
             env: env.clone(),
@@ -52,18 +51,34 @@ pub(crate) async fn root_tools(env: &Env, me: &AgentIdentity, config: &Config) -
     tools
 }
 
+/// Add the tools of the MCP servers and, when they are switched on demand, the
+/// tool that does the switching.
+async fn add_mcp_tools(tools: &mut ToolRegistry, env: &Env, config: &Config) {
+    let mcp = env.manager.mcp.tools().await;
+    if mcp.is_empty() {
+        return;
+    }
+    if config.dynamic_mcp_tools {
+        tools.add(Arc::new(McpTools::new(env.session.clone(), &mcp)));
+    }
+    for tool in mcp {
+        tools.add(tool);
+    }
+}
+
 /// Tools of a sub-agent of the given type.
 async fn subagent_tools(env: &Env, agent_type: &str, me: &AgentIdentity, config: &Config) -> ToolRegistry {
     let mut tools = ToolRegistry::builtin();
     match agent_type {
-        "explore" => {
-            tools.retain(|tool| matches!(tool.name(), "read_file" | "list_dir" | "glob" | "grep" | "web_fetch"))
-        }
+        "explore" => tools.retain(|tool| {
+            matches!(
+                tool.name(),
+                "read_file" | "list_dir" | "glob" | "grep" | "web_fetch" | "web_search"
+            )
+        }),
         "review" => tools.retain(|tool| !matches!(tool.kind(), ToolKind::Edit)),
         _ => {
-            for tool in env.manager.mcp.tools().await {
-                tools.add(tool);
-            }
+            add_mcp_tools(&mut tools, env, config).await;
             if me.depth < config.max_agent_depth {
                 tools.add(Arc::new(TaskTool {
                     env: env.clone(),
@@ -215,9 +230,12 @@ impl Tool for TaskTool {
             effort: me.effort,
             system,
             tools: subagent_tools(env, agent_type, &me, &config).await,
+            check_command: crate::diagnostics::check_command(&config, &cwd),
             cwd,
             context_limit: session::context_limit(&config, context_window),
             max_steps: config.max_steps_per_turn,
+            verify_before_finish: config.verify_before_finish,
+            dynamic_tool_groups: config.dynamic_mcp_tools,
         };
 
         session.emit(
@@ -267,12 +285,144 @@ impl Tool for TaskTool {
     }
 }
 
+/// Lets the model switch the tools of MCP servers on and off, so their
+/// definitions occupy the context only while they are needed.
+pub(crate) struct McpTools {
+    session: Arc<Session>,
+    /// Server name and its tools as (exposed name, first line of the description).
+    servers: BTreeMap<String, Vec<(String, String)>>,
+}
+
+impl McpTools {
+    pub(crate) fn new(session: Arc<Session>, tools: &[Arc<dyn Tool>]) -> Self {
+        let mut servers: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
+        for tool in tools {
+            let Some(server) = tool.group() else { continue };
+            let summary = tool.description().lines().next().unwrap_or_default().trim().to_string();
+            servers
+                .entry(server.to_string())
+                .or_default()
+                .push((tool.name().to_string(), summary));
+        }
+        McpTools { session, servers }
+    }
+
+    fn names(&self) -> String {
+        self.servers.keys().map(String::as_str).collect::<Vec<_>>().join(", ")
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct McpToolsArgs {
+    action: McpAction,
+    #[serde(default)]
+    server: Option<String>,
+}
+
+#[derive(Deserialize, Clone, Copy, PartialEq)]
+#[serde(rename_all = "snake_case")]
+enum McpAction {
+    List,
+    Enable,
+    Disable,
+}
+
+#[async_trait]
+impl Tool for McpTools {
+    fn name(&self) -> &str {
+        "mcp_tools"
+    }
+
+    fn description(&self) -> String {
+        let servers: Vec<String> = self
+            .servers
+            .iter()
+            .map(|(name, tools)| format!("{name} ({} tools)", tools.len()))
+            .collect();
+        format!(
+            "Switch the tools of MCP servers on and off. They are off until you need them, so that their \
+             definitions do not fill the context. Servers on this machine: {}. `list` shows every server \
+             with its tools and whether it is on. `enable` makes the tools of one server callable from your \
+             next step. `disable` removes them again; do that when you no longer need them.",
+            servers.join(", ")
+        )
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["list", "enable", "disable"]},
+                "server": {"type": "string", "description": "Server name; required for enable and disable."}
+            },
+            "required": ["action"]
+        })
+    }
+
+    fn kind(&self) -> ToolKind {
+        ToolKind::Read
+    }
+
+    /// Switching changes the tool list of the next step; two switches in one
+    /// step must not race.
+    fn parallel_safe(&self) -> bool {
+        false
+    }
+
+    fn summarize(&self, input: &Value) -> String {
+        format!("{} {}", arg_str(input, "action"), arg_str(input, "server"))
+            .trim()
+            .to_string()
+    }
+
+    async fn run(&self, input: Value, _ctx: &ToolContext) -> ToolOutput {
+        let args: McpToolsArgs = match parse_input(input) {
+            Ok(args) => args,
+            Err(output) => return output,
+        };
+        if args.action == McpAction::List {
+            let mut out = String::new();
+            for (server, tools) in &self.servers {
+                let state = if self.session.tool_group_active(server) {
+                    "on"
+                } else {
+                    "off"
+                };
+                out.push_str(&format!("{server} ({state})\n"));
+                for (name, summary) in tools {
+                    out.push_str(&format!("  {name}: {summary}\n"));
+                }
+            }
+            return ToolOutput::ok(out);
+        }
+        let Some(server) = args.server.as_deref().filter(|name| !name.is_empty()) else {
+            return ToolOutput::error(format!("`server` is required. Servers: {}.", self.names()));
+        };
+        let Some(tools) = self.servers.get(server) else {
+            return ToolOutput::error(format!("No MCP server named `{server}`. Servers: {}.", self.names()));
+        };
+        let enable = args.action == McpAction::Enable;
+        self.session.set_tool_group(server, enable);
+        if enable {
+            let names: Vec<&str> = tools.iter().map(|(name, _)| name.as_str()).collect();
+            ToolOutput::ok(format!(
+                "`{server}` is on. Callable from your next step: {}.",
+                names.join(", ")
+            ))
+        } else {
+            ToolOutput::ok(format!("`{server}` is off; its tools are no longer in your tool list."))
+        }
+    }
+}
+
 pub(crate) struct TodoWrite {
     session: Arc<Session>,
     agent_id: String,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct TodoArgs {
     todos: Vec<Todo>,
 }

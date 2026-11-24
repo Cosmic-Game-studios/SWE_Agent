@@ -3,8 +3,9 @@
 
 import { memo, useState } from 'react';
 
+
 import { type ApprovalDecision, type ToolKind, api } from '../api';
-import { OUTCOME_LABEL, formatDuration, formatTokens, usageSummary } from '../format';
+import { OUTCOME_LABEL, baseName, formatDuration, formatTokens, usageSummary } from '../format';
 import { type AgentView, type Item, ROOT, type SessionView, type ToolView } from '../session';
 import { attempt } from '../store';
 import { DiffStat, InlineDiff } from './DiffView';
@@ -239,14 +240,60 @@ function Reasoning({ text, live }: { text: string; live?: boolean }) {
   );
 }
 
+/** Undo the file edits made since a user message. Asks before it does. */
+function Rewind({ sessionId, seq, files }: { sessionId: string; seq: number; files: string[] }) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const count = `${files.length} file${files.length === 1 ? '' : 's'}`;
+  if (!confirming) {
+    return (
+      <button
+        type="button"
+        className="rewind-trigger"
+        title={`Put ${count} back to what they were before this message:\n${files.join('\n')}`}
+        onClick={() => setConfirming(true)}
+      >
+        <Icon name="refresh" size={12} />
+        Rewind {count}
+      </button>
+    );
+  }
+  const names = files.slice(0, 3).map(baseName).join(', ') + (files.length > 3 ? ` and ${files.length - 3} more` : '');
+  return (
+    <div className="rewind-confirm" role="group" aria-label="Rewind files">
+      <span>
+        Restore {names} to before this message? Edits made since, by the agent or by you, are lost. The conversation stays.
+      </span>
+      <Button
+        small
+        variant="danger"
+        busy={busy}
+        onClick={async () => {
+          setBusy(true);
+          await attempt(() => api.rewind(sessionId, seq));
+          setBusy(false);
+          setConfirming(false);
+        }}
+      >
+        Rewind
+      </Button>
+      <Button small onClick={() => setConfirming(false)}>
+        Cancel
+      </Button>
+    </div>
+  );
+}
+
 interface ItemProps {
   item: Item;
   view: SessionView;
   sessionId: string;
+  /** Files the turn started by this user message changed, when it can be rewound. */
+  rewindFiles?: string[];
 }
 
 const ItemView = memo(
-  function ItemView({ item, view, sessionId }: ItemProps) {
+  function ItemView({ item, view, sessionId, rewindFiles }: ItemProps) {
     switch (item.kind) {
       case 'user':
         return (
@@ -259,6 +306,7 @@ const ItemView = memo(
               </div>
             ) : null}
             <div className="user-text">{item.text}</div>
+            {rewindFiles?.length ? <Rewind sessionId={sessionId} seq={Number(item.key)} files={rewindFiles} /> : null}
           </div>
         );
       case 'assistant':
@@ -309,6 +357,7 @@ const ItemView = memo(
   },
   (previous, next) => {
     if (previous.item !== next.item || previous.sessionId !== next.sessionId) return false;
+    if (previous.rewindFiles !== next.rewindFiles) return false;
     if (next.item.kind !== 'assistant') return true;
     for (const block of next.item.blocks) {
       if (block.type !== 'tool') continue;
@@ -363,18 +412,27 @@ export function AgentTimeline({
   view,
   sessionId,
   nested,
+  checkpoints,
 }: {
   agentId: string;
   view: SessionView;
   sessionId: string;
   nested?: boolean;
+  /** Rewindable turns by user message key; omitted while the agent works. */
+  checkpoints?: Record<string, string[]>;
 }) {
   const agent = view.agents[agentId];
   if (!agent) return null;
   return (
     <div className={nested ? 'timeline nested' : 'timeline'}>
       {agent.items.map((item) => (
-        <ItemView key={item.key} item={item} view={view} sessionId={sessionId} />
+        <ItemView
+          key={item.key}
+          item={item}
+          view={view}
+          sessionId={sessionId}
+          rewindFiles={item.kind === 'user' ? checkpoints?.[item.key] : undefined}
+        />
       ))}
       <LiveArea agent={agent} view={view} sessionId={sessionId} />
     </div>

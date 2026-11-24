@@ -1,0 +1,7 @@
+prompt = """
+Add a function `slugify(text)` to textutil.py that turns a title into a URL slug: lower-case, words \
+joined by single hyphens, everything that is not an ASCII letter or digit treated as a separator, and \
+no hyphen at the start or the end. An input without any letters or digits gives an empty string. \
+Do not change the existing functions.
+"""
+check = "python3 test_slugify.py || python test_slugify.py"

@@ -6,8 +6,10 @@
 //! session's event stream.
 
 mod agent;
+mod checkpoint;
 mod compaction;
 pub mod config;
+mod diagnostics;
 mod external;
 pub mod mcp;
 pub mod permissions;
@@ -16,6 +18,7 @@ pub mod session;
 mod subagent;
 mod worktree;
 
+pub use checkpoint::Checkpoint;
 pub use config::{Config, DEMO_PROVIDER, KeyStatus, Paths, ProviderConfig, ProviderInfo, ProviderRegistry};
 pub use external::{EngineInfo, engines};
 pub use session::{

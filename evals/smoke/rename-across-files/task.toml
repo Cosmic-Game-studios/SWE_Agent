@@ -1,0 +1,6 @@
+prompt = """
+Rename the function `calc_total` to `compute_total` everywhere in this project, including its \
+definition, every call and every import. Behaviour must not change, and nothing may still refer to \
+the old name.
+"""
+check = "python3 check_rename.py || python check_rename.py"

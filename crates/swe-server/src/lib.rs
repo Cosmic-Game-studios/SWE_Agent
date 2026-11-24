@@ -147,6 +147,8 @@ pub fn router(manager: SessionManager, options: &ServeOptions) -> Router {
         .route("/sessions/{id}/approvals/{request_id}", post(resolve_approval))
         .route("/sessions/{id}/events", get(session_events))
         .route("/sessions/{id}/diff", get(session_diff))
+        .route("/sessions/{id}/checkpoints", get(list_checkpoints))
+        .route("/sessions/{id}/rewind", post(rewind_session))
         .fallback(|| async { ApiError::new(StatusCode::NOT_FOUND, "no such endpoint") });
     Router::new()
         .nest("/api", api)
@@ -411,6 +413,28 @@ async fn send_message(
 ) -> ApiResult<Json<Value>> {
     let queued = state.manager.send_message(&id, input)?;
     Ok(Json(json!({"queued": queued})))
+}
+
+async fn list_checkpoints(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Vec<swe_core::Checkpoint>>> {
+    Ok(Json(state.manager.checkpoints(&id)?))
+}
+
+#[derive(Deserialize)]
+struct RewindBody {
+    /// Sequence number of the user message to rewind the files to.
+    seq: u64,
+}
+
+async fn rewind_session(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<RewindBody>,
+) -> ApiResult<Json<Value>> {
+    let restored = state.manager.rewind(&id, body.seq)?;
+    Ok(Json(json!({"restored": restored})))
 }
 
 async fn cancel_session(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {

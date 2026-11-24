@@ -27,6 +27,7 @@ use swe_tools::{OutputSink, Tool, ToolContext, ToolOutput, ToolRegistry};
 use tokio_util::sync::CancellationToken;
 
 use crate::compaction;
+use crate::diagnostics::{self, CheckOutcome};
 use crate::permissions::Verdict;
 use crate::session::{ApprovalOutcome, ManagerInner, Session, UserInput};
 
@@ -61,6 +62,19 @@ pub(crate) struct AgentSpec {
     /// Compact once the context in use exceeds this many tokens.
     pub context_limit: u64,
     pub max_steps: u32,
+    /// Question a finish that follows file changes nothing was run after.
+    pub verify_before_finish: bool,
+    /// Tools with a group (MCP servers) are offered only while the group is on.
+    pub dynamic_tool_groups: bool,
+    /// Shell command that checks the project after a step that edited files.
+    pub check_command: Option<String>,
+}
+
+impl AgentSpec {
+    /// Whether the model can call `tool` right now.
+    fn offers(&self, session: &Session, tool: &dyn Tool) -> bool {
+        !self.dynamic_tool_groups || tool.group().is_none_or(|group| session.tool_group_active(group))
+    }
 }
 
 pub(crate) struct TurnResult {
@@ -101,13 +115,16 @@ pub(crate) async fn run_agent(
 ) -> TurnResult {
     let is_root = spec.agent_id == ROOT_AGENT;
     let session = &env.session;
-    let tool_specs = spec.tools.specs();
     let mut usage = Usage::default();
     let mut final_text = String::new();
     let mut context_tokens = if is_root { session.meta().context_tokens } else { 0 };
     let mut continuations = 0u32;
     let mut steps = 0u32;
     let mut nudged_after_empty = false;
+    let mut asked_to_verify = false;
+    // Files were changed and no command has run since.
+    let mut unverified_edits = false;
+    let mut check_enabled = spec.check_command.is_some();
     // Calls that failed in the previous step, with how often in a row.
     let mut failing: HashMap<String, u32> = HashMap::new();
 
@@ -137,6 +154,21 @@ pub(crate) async fn run_agent(
         }
         steps += 1;
 
+        // Dropping old tool output is free and loses little; summarise only when
+        // that does not make enough room.
+        if context_tokens > spec.context_limit {
+            let freed = compaction::prune_tool_results(history);
+            if freed > 0 {
+                context_tokens = context_tokens.saturating_sub(freed);
+                save(history);
+                session.emit(
+                    &spec.agent_id,
+                    EventKind::Notice {
+                        text: format!("Dropped old tool output to free about {freed} tokens of context."),
+                    },
+                );
+            }
+        }
         if context_tokens > spec.context_limit {
             match compaction::compact(env, spec, history, context_tokens).await {
                 Ok(spent) => {
@@ -160,6 +192,8 @@ pub(crate) async fn run_agent(
             }
         }
 
+        // Per step: the model can switch tool groups on and off as it goes.
+        let tool_specs = spec.tools.specs_where(|tool| spec.offers(session, tool));
         let completion = match request(env, spec, history, &tool_specs, &mut usage).await {
             Ok(completion) => completion,
             Err(RequestError::Cancelled { partial }) => {
@@ -293,11 +327,53 @@ pub(crate) async fn run_agent(
                 save(history);
                 continue;
             }
+            // Root agent only: a sub-agent's last message is its report to the parent,
+            // which a reply to this notice would replace.
+            if is_root && spec.verify_before_finish && unverified_edits && !asked_to_verify {
+                asked_to_verify = true;
+                history.push(Message::user_text(VERIFY_NUDGE));
+                save(history);
+                continue;
+            }
             return finish(TurnOutcome::Completed, usage, final_text, None);
         }
 
         let mut results = execute_tools(env, spec, &calls).await;
         note_repeated_failures(&calls, &mut results, &mut failing);
+        let mut last_edit = None;
+        for (index, (call, result)) in calls.iter().zip(&results).enumerate() {
+            let succeeded = matches!(result, ContentBlock::ToolResult { is_error: false, .. });
+            match spec.tools.get(&call.name).map(|tool| tool.kind()) {
+                Some(swe_protocol::ToolKind::Edit) if succeeded => {
+                    unverified_edits = true;
+                    last_edit = Some(index);
+                }
+                // Any command counts: which ones verify the change is the model's call.
+                Some(swe_protocol::ToolKind::Execute) => unverified_edits = false,
+                _ => {}
+            }
+        }
+        if let Some(index) = last_edit.filter(|_| check_enabled)
+            && let Some(outcome) = diagnostics::run_check(env, spec).await
+        {
+            let command = spec.check_command.as_deref().unwrap_or_default();
+            let note = match outcome {
+                CheckOutcome::Passed => format!("[Automatic check after this step (`{command}`): passed.]"),
+                CheckOutcome::Failed(output) => {
+                    format!("[Automatic check after this step (`{command}`) failed:\n{output}]")
+                }
+                CheckOutcome::TimedOut => {
+                    check_enabled = false;
+                    let text = format!("The automatic check `{command}` took too long and is off for this turn.");
+                    session.emit(&spec.agent_id, EventKind::Notice { text });
+                    format!("[Automatic check (`{command}`) timed out; it will not run again this turn.]")
+                }
+            };
+            if let ContentBlock::ToolResult { content, .. } = &mut results[index] {
+                content.push_str("\n\n");
+                content.push_str(&note);
+            }
+        }
         history.push(Message {
             role: Role::User,
             content: results,
@@ -308,6 +384,11 @@ pub(crate) async fn run_agent(
 
 const EMPTY_RESPONSE_NUDGE: &str = "Your last response was empty. Continue the task, or state the result if \
                                     you are done.";
+
+const VERIFY_NUDGE: &str = "<system-notice>\nYou changed files in this turn and have not run anything since. \
+                            Before you finish, verify the change: build it, run the tests that cover it, or \
+                            run it. If it cannot be verified here (documentation, no way to run it), say so \
+                            plainly instead. Then close with your summary for the user.\n</system-notice>";
 
 /// A call that fails this many times in a row with the same arguments gets a note.
 const REPEATED_FAILURE_LIMIT: u32 = 3;
@@ -673,6 +754,14 @@ async fn plan_call(env: &Env, spec: &AgentSpec, call: &Call) -> Planned {
             spec.tools.names().join(", ")
         ));
     };
+    if !spec.offers(session, tool.as_ref()) {
+        return Planned::Reject(format!(
+            "The MCP server `{}` is switched off, so `{}` cannot be called. Switch it on first with mcp_tools \
+             (action `enable`).",
+            tool.group().unwrap_or_default(),
+            call.name
+        ));
+    }
     let verdict = session.policy().check(tool.as_ref(), &call.input, &spec.cwd);
     match verdict {
         Verdict::Allow => Planned::Run(tool),
@@ -755,6 +844,13 @@ async fn run_call(env: &Env, spec: &AgentSpec, call: &Call, tool: Arc<dyn Tool>)
             shell: session.shell(),
             call_id: call.id.clone(),
         };
+        // Sub-agents in a worktree work on a branch of their own; there is nothing
+        // in the workspace to rewind for them.
+        if tool.kind() == swe_protocol::ToolKind::Edit && spec.cwd == session.workspace() {
+            for path in tool.paths(&call.input) {
+                session.checkpoint_file(&swe_tools::resolve_path(&spec.cwd, &path));
+            }
+        }
         let mut output = tool.run(call.input.clone(), &ctx).await;
         output.content = truncate_middle(&output.content, MAX_TOOL_RESULT_CHARS);
         output

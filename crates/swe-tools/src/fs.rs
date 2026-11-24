@@ -12,6 +12,9 @@ use crate::{Tool, ToolContext, ToolOutput, arg_str, display_path, parse_input};
 
 const DEFAULT_READ_LINES: usize = 2000;
 const MAX_LINE_CHARS: usize = 2000;
+/// A page of read_file output stays below the size at which the agent loop would
+/// cut its middle out; the footer then names the line to continue from.
+const MAX_READ_OUTPUT_BYTES: usize = 80_000;
 const MAX_READ_BYTES: u64 = 20 * 1024 * 1024;
 const MAX_DIR_ENTRIES: usize = 1000;
 
@@ -48,6 +51,7 @@ async fn read_text(path: &Path, shown: &str) -> Result<String, ToolOutput> {
 pub struct ReadFile;
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ReadArgs {
     path: String,
     #[serde(default)]
@@ -118,8 +122,12 @@ impl Tool for ReadFile {
         let mut out = String::new();
         let mut last = start - 1;
         for (index, line) in text.lines().enumerate().skip(start - 1).take(limit) {
+            let numbered = format!("{}\t{}\n", index + 1, truncate_line(line, MAX_LINE_CHARS));
+            if !out.is_empty() && out.len() + numbered.len() > MAX_READ_OUTPUT_BYTES {
+                break;
+            }
             last = index + 1;
-            out.push_str(&format!("{}\t{}\n", index + 1, truncate_line(line, MAX_LINE_CHARS)));
+            out.push_str(&numbered);
         }
         if last < total {
             out.push_str(&format!(
@@ -153,6 +161,7 @@ fn near_miss(file: &str, old_string: &str) -> String {
 pub struct WriteFile;
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct WriteArgs {
     path: String,
     content: String,
@@ -240,6 +249,7 @@ impl Tool for WriteFile {
 pub struct EditFile;
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct EditArgs {
     path: String,
     old_string: String,
@@ -294,77 +304,195 @@ impl Tool for EditFile {
         };
         let path = ctx.resolve(&args.path);
         let shown = display_path(&ctx.cwd, &path);
-        if args.old_string.is_empty() {
-            return ToolOutput::error("old_string is empty. To create a file use write_file.");
+        let before = match read_text(&path, &shown).await {
+            Ok(text) => text,
+            Err(output) => return output,
+        };
+        let (after, replaced) = match replace(&before, &args.old_string, &args.new_string, args.replace_all) {
+            Ok(done) => done,
+            Err(problem) => return ToolOutput::error(format!("In {shown}: {problem}")),
+        };
+        if let Err(err) = tokio::fs::write(&path, &after).await {
+            return ToolOutput::error(format!("Cannot write {shown}: {err}"));
         }
-        if args.old_string == args.new_string {
-            return ToolOutput::error("old_string and new_string are identical; nothing to change.");
+        edited(shown, &before, &after, replaced)
+    }
+}
+
+/// Apply one replacement to `before`. Returns the new text and how many
+/// occurrences were replaced, or what the model has to correct.
+fn replace(before: &str, old_string: &str, new_string: &str, replace_all: bool) -> Result<(String, usize), String> {
+    if old_string.is_empty() {
+        return Err("old_string is empty. To create a file use write_file.".into());
+    }
+    if old_string == new_string {
+        return Err("old_string and new_string are identical; nothing to change.".into());
+    }
+    // Models write `\n`. In a CRLF file that would never match, and a replacement
+    // written as it came would leave the file with mixed line endings.
+    let crlf = |text: &str| text.replace("\r\n", "\n").replace('\n', "\r\n");
+    let (old, new) = if before.contains("\r\n") && (before.contains(&crlf(old_string)) || !before.contains(old_string))
+    {
+        (crlf(old_string), crlf(new_string))
+    } else {
+        (old_string.to_string(), new_string.to_string())
+    };
+
+    let occurrences = before.matches(&old).count();
+    if occurrences == 0 {
+        return Err(format!(
+            "old_string was not found. It must match exactly, including whitespace. {}",
+            near_miss(before, old_string)
+        ));
+    }
+    if occurrences > 1 && !replace_all {
+        let lines: Vec<String> = before
+            .match_indices(&old)
+            .take(10)
+            .map(|(index, _)| (before[..index].matches('\n').count() + 1).to_string())
+            .collect();
+        return Err(format!(
+            "old_string occurs {occurrences} times (starting at line {}{}). Add surrounding context to make \
+             it unique, or set replace_all to true.",
+            lines.join(", "),
+            if occurrences > lines.len() { ", ..." } else { "" }
+        ));
+    }
+    if replace_all {
+        Ok((before.replace(&old, &new), occurrences))
+    } else {
+        Ok((before.replacen(&old, &new, 1), 1))
+    }
+}
+
+/// The result of a successful edit: a summary for the model, the diff for the UI.
+fn edited(shown: String, before: &str, after: &str, replaced: usize) -> ToolOutput {
+    let diff = unified_diff(&shown, before, after);
+    ToolOutput::ok(format!(
+        "Edited {shown}: {replaced} replacement{} (+{} -{}).",
+        if replaced == 1 { "" } else { "s" },
+        diff.added,
+        diff.removed
+    ))
+    .with_display(ToolDisplay::Diff {
+        path: shown,
+        diff: diff.unified,
+        added: diff.added,
+        removed: diff.removed,
+        created: false,
+    })
+}
+
+pub struct MultiEdit;
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MultiEditArgs {
+    path: String,
+    edits: Vec<Replacement>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Replacement {
+    old_string: String,
+    new_string: String,
+    #[serde(default)]
+    replace_all: bool,
+}
+
+#[async_trait]
+impl Tool for MultiEdit {
+    fn name(&self) -> &str {
+        "multi_edit"
+    }
+
+    fn description(&self) -> String {
+        "Make several replacements in one file in a single step. The edits are applied in order, each \
+         to the result of the one before it, and the file is written only if every edit applies: if \
+         one fails, nothing changes and the error names it. Each edit follows the rules of edit_file. \
+         Use this instead of several edit_file calls on the same file."
+            .to_string()
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File path, absolute or relative to the working directory."},
+                "edits": {
+                    "type": "array",
+                    "minItems": 1,
+                    "description": "Replacements, applied in order.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "old_string": {"type": "string", "description": "Exact text to replace."},
+                            "new_string": {"type": "string", "description": "Replacement text."},
+                            "replace_all": {"type": "boolean", "description": "Replace every occurrence instead of requiring a unique match."}
+                        },
+                        "required": ["old_string", "new_string"]
+                    }
+                }
+            },
+            "required": ["path", "edits"]
+        })
+    }
+
+    fn kind(&self) -> ToolKind {
+        ToolKind::Edit
+    }
+
+    fn summarize(&self, input: &Value) -> String {
+        arg_str(input, "path").to_string()
+    }
+
+    fn paths(&self, input: &Value) -> Vec<String> {
+        vec![arg_str(input, "path").to_string()]
+    }
+
+    async fn run(&self, input: Value, ctx: &ToolContext) -> ToolOutput {
+        let args: MultiEditArgs = match parse_input(input) {
+            Ok(args) => args,
+            Err(output) => return output,
+        };
+        let path = ctx.resolve(&args.path);
+        let shown = display_path(&ctx.cwd, &path);
+        if args.edits.is_empty() {
+            return ToolOutput::error("edits is empty; nothing to change.");
         }
         let before = match read_text(&path, &shown).await {
             Ok(text) => text,
             Err(output) => return output,
         };
-
-        // Models write `\n`. In a CRLF file that would never match, and a replacement
-        // written as it came would leave the file with mixed line endings.
-        let crlf = |text: &str| text.replace("\r\n", "\n").replace('\n', "\r\n");
-        let (old, new) = if before.contains("\r\n")
-            && (before.contains(&crlf(&args.old_string)) || !before.contains(&args.old_string))
-        {
-            (crlf(&args.old_string), crlf(&args.new_string))
-        } else {
-            (args.old_string.clone(), args.new_string.clone())
-        };
-
-        let occurrences = before.matches(&old).count();
-        if occurrences == 0 {
-            return ToolOutput::error(format!(
-                "old_string was not found in {shown}. It must match exactly, including whitespace. {}",
-                near_miss(&before, &args.old_string)
-            ));
+        let mut after = before.clone();
+        let mut replaced = 0;
+        for (index, edit) in args.edits.iter().enumerate() {
+            match replace(&after, &edit.old_string, &edit.new_string, edit.replace_all) {
+                Ok((text, count)) => {
+                    after = text;
+                    replaced += count;
+                }
+                Err(problem) => {
+                    return ToolOutput::error(format!(
+                        "Edit {} of {} in {shown} failed, so the file was not changed: {problem}",
+                        index + 1,
+                        args.edits.len()
+                    ));
+                }
+            }
         }
-        if occurrences > 1 && !args.replace_all {
-            let lines: Vec<String> = before
-                .match_indices(&old)
-                .take(10)
-                .map(|(index, _)| (before[..index].matches('\n').count() + 1).to_string())
-                .collect();
-            return ToolOutput::error(format!(
-                "old_string occurs {occurrences} times in {shown} (starting at line {}{}). Add surrounding \
-                 context to make it unique, or set replace_all to true.",
-                lines.join(", "),
-                if occurrences > lines.len() { ", ..." } else { "" }
-            ));
-        }
-        let after = if args.replace_all {
-            before.replace(&old, &new)
-        } else {
-            before.replacen(&old, &new, 1)
-        };
         if let Err(err) = tokio::fs::write(&path, &after).await {
             return ToolOutput::error(format!("Cannot write {shown}: {err}"));
         }
-        let diff = unified_diff(&shown, &before, &after);
-        let replaced = if args.replace_all { occurrences } else { 1 };
-        ToolOutput::ok(format!(
-            "Edited {shown}: {replaced} replacement{} (+{} -{}).",
-            if replaced == 1 { "" } else { "s" },
-            diff.added,
-            diff.removed
-        ))
-        .with_display(ToolDisplay::Diff {
-            path: shown,
-            diff: diff.unified,
-            added: diff.added,
-            removed: diff.removed,
-            created: false,
-        })
+        edited(shown, &before, &after, replaced)
     }
 }
 
 pub struct ListDir;
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ListArgs {
     #[serde(default)]
     path: Option<String>,
@@ -657,5 +785,102 @@ mod tests {
         let out = ListDir.run(json!({}), &ctx(&dir)).await;
         assert_eq!(out.content, "src/\na.txt\nb.txt");
         assert!(ListDir.run(json!({"path": "missing"}), &ctx(&dir)).await.is_error);
+    }
+}
+
+#[cfg(test)]
+mod budget_and_multi_edit_tests {
+    use std::fs;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn a_large_page_ends_at_a_line_and_says_where_to_continue() {
+        let dir = tempfile::tempdir().unwrap();
+        let line = "x".repeat(99);
+        fs::write(dir.path().join("big.txt"), format!("{line}\n").repeat(3000)).unwrap();
+        let ctx = ToolContext::new(dir.path());
+
+        let page = ReadFile.run(json!({"path": "big.txt"}), &ctx).await;
+        assert!(!page.is_error);
+        assert!(
+            page.content.len() <= MAX_READ_OUTPUT_BYTES + 200,
+            "{}",
+            page.content.len()
+        );
+        let shown = page.content.lines().filter(|l| l.contains('\t')).count();
+        assert!(shown < 2000, "the byte budget, not the line limit, ended the page");
+        assert!(
+            page.content.ends_with(&format!(
+                "[Showing lines 1-{shown} of 3000. Use offset={} to continue.]",
+                shown + 1
+            )),
+            "{}",
+            &page.content[page.content.len() - 120..]
+        );
+
+        let next = ReadFile
+            .run(json!({"path": "big.txt", "offset": shown + 1}), &ctx)
+            .await;
+        assert!(next.content.starts_with(&format!("{}\t", shown + 1)));
+    }
+
+    #[tokio::test]
+    async fn multi_edit_applies_every_edit_or_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.rs");
+        fs::write(&file, "let a = 1;\nlet b = 2;\nlet c = 3;\n").unwrap();
+        let ctx = ToolContext::new(dir.path());
+
+        let failed = MultiEdit
+            .run(
+                json!({"path": "a.rs", "edits": [
+                    {"old_string": "a = 1", "new_string": "a = 10"},
+                    {"old_string": "missing", "new_string": "x"}
+                ]}),
+                &ctx,
+            )
+            .await;
+        assert!(failed.is_error);
+        assert!(failed.content.contains("Edit 2 of 2"), "{}", failed.content);
+        assert_eq!(
+            fs::read_to_string(&file).unwrap(),
+            "let a = 1;\nlet b = 2;\nlet c = 3;\n",
+            "a failed edit leaves the file as it was"
+        );
+
+        let done = MultiEdit
+            .run(
+                json!({"path": "a.rs", "edits": [
+                    {"old_string": "a = 1", "new_string": "a = 10"},
+                    // Applies to the result of the first edit.
+                    {"old_string": "a = 10;\nlet b = 2", "new_string": "a = 10;\nlet b = 20"},
+                    {"old_string": "let", "new_string": "const", "replace_all": true}
+                ]}),
+                &ctx,
+            )
+            .await;
+        assert!(!done.is_error, "{}", done.content);
+        assert_eq!(
+            fs::read_to_string(&file).unwrap(),
+            "const a = 10;\nconst b = 20;\nconst c = 3;\n"
+        );
+        assert!(done.content.contains("5 replacements"), "{}", done.content);
+    }
+
+    #[tokio::test]
+    async fn unknown_arguments_are_named_instead_of_ignored() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("a.txt"), "x").unwrap();
+        let out = ReadFile
+            .run(json!({"path": "a.txt", "lines": 5}), &ToolContext::new(dir.path()))
+            .await;
+        assert!(out.is_error);
+        assert!(out.content.contains("unknown field `lines`"), "{}", out.content);
+        assert!(
+            out.content.contains("limit"),
+            "the valid names are listed: {}",
+            out.content
+        );
     }
 }

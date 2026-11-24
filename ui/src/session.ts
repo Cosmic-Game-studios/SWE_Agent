@@ -368,6 +368,8 @@ export class SessionStore {
   /** Messages accepted by the server but not yet picked up by the agent. */
   queued: string[] = [];
   connected = true;
+  /** Files each turn changed, by the key of the user message that started it. */
+  checkpoints: Record<string, string[]> = {};
 
   private listeners = new Set<Listener>();
   private pending: AgentEvent[] = [];
@@ -402,6 +404,7 @@ export class SessionStore {
       this.view = viewFromSnapshot(snapshot);
       this.state = 'ready';
       this.notify();
+      void this.refreshCheckpoints();
       this.closeStream = openEventStream<AgentEvent>(
         `/sessions/${this.id}/events`,
         () => ({ after: String(this.view.lastSeq) }),
@@ -454,6 +457,8 @@ export class SessionStore {
     if (!this.pending.length) return;
     let view = this.view;
     let queued = this.queued;
+    // A finished turn may have added a checkpoint; a rewind (a notice) removes some.
+    const checkpointsChanged = this.pending.some((event) => event.type === 'turn_finished' || event.type === 'notice');
     for (const event of this.pending) {
       view = applyEvent(view, event);
       if (event.type === 'user_message') {
@@ -468,6 +473,18 @@ export class SessionStore {
     this.view = view;
     this.queued = queued;
     this.notify();
+    if (checkpointsChanged) void this.refreshCheckpoints();
+  }
+
+  private async refreshCheckpoints(): Promise<void> {
+    try {
+      const list = await api.checkpoints(this.id);
+      if (this.disposed) return;
+      this.checkpoints = Object.fromEntries(list.map((checkpoint) => [String(checkpoint.seq), checkpoint.files]));
+      this.notify();
+    } catch {
+      // Without the list the rewind buttons are simply not shown.
+    }
   }
 
   async send(text: string, images: ImageRef[]): Promise<void> {

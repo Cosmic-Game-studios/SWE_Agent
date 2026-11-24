@@ -19,8 +19,9 @@ in [`site/`](site/index.html).
   every OpenAI-compatible endpoint (Ollama, LM Studio, vLLM, Groq, DeepSeek, ...). Model lists come live from the provider.
 - **A real agent loop.** Streaming, parallel tool calls, retries with backoff, cancellation, messages that steer a running turn,
   and recovery from truncated or malformed tool calls.
-- **Tools.** Read, write and edit files; glob and regex search; shell commands in the foreground or as background processes;
-  web fetch; a todo list; and any external tool through MCP.
+- **Tools.** Read, write and edit files, with several edits to one file in a single step; glob and regex search; shell
+  commands in the foreground or as background processes; web search and web fetch; a todo list; and any external tool through
+  MCP, loaded on demand.
 - **Permission modes.** `plan` (read-only), `ask`, `auto-edit` and `full-auto`, with approvals in the UI and "always allow" rules
   per command, path or host.
 - **Long runs.** Sessions live in the server, survive a closed browser tab and a restart, and compact their context into a
@@ -140,11 +141,49 @@ args = ["-y", "@modelcontextprotocol/server-github"]
 env = { GITHUB_TOKEN = "..." }
 ```
 
+MCP tools are loaded on demand. Their definitions are not sent to the model until it switches a server on with the `mcp_tools`
+tool, and it switches the server off again when it is done, so servers with many tools do not fill the context of every request.
+The choice is kept per session. Set `dynamic_mcp_tools = false` in `config.toml` to offer every MCP tool all the time.
+
+## Loop safeguards
+
+- When the agent wants to finish a turn in which it changed files and ran nothing afterwards, it is asked once to verify the
+  change (`verify_before_finish = false` turns this off).
+- When the context fills up, old and large tool output is dropped first; the conversation is only summarised when that does not
+  free enough room.
+- A call that fails three times in a row with the same arguments is called out, and an empty response is questioned once.
+- After a step that edited files, the project's check runs and its result is attached to the edit: `cargo check` for a Cargo
+  project, `tsc --noEmit` where TypeScript is installed locally, `go vet` for a Go module, or the `check_command` from
+  `config.toml`. It runs only where the agent may run commands without asking (full-auto, or an "always allow" rule that covers
+  it), and switches itself off for the turn when it takes longer than 90 seconds. `auto_check = false` turns it off.
+
+## Rewinding files
+
+Before a file tool changes a file, the agent stores what the file contained. In the UI, every message whose turn changed files
+gets a **Rewind** button that puts those files back to their state before that message, undoing that turn and all later ones.
+The conversation is kept, and the agent is told what was rewound. Only edits made with the file tools are recorded; what a shell
+command changes is not.
+
+## Measuring with `swe eval`
+
+`swe eval <suite>` runs every task of a suite with one model and reports what was solved, with steps, tool calls, failed calls,
+time and tokens per task:
+
+```sh
+swe eval evals/smoke --provider anthropic --model claude-opus-5-5 --out results.json
+```
+
+A task is a directory with a `task.toml` (`prompt`, `check`, optional `timeout_secs`), a `repo/` the agent starts from, and an
+optional `hidden/` that is copied in only before the check runs, for tests the agent must not see. Each task runs in a fresh
+copy in full-auto mode, so run suites you trust, ideally in a container. `evals/smoke` holds three small Python tasks to try
+the harness with; it is not a benchmark.
+
 ## Command line
 
 ```
 swe [serve]        start the server and UI (--port, --host, --token, --no-open)
 swe run <prompt>   run one task headless (-C dir, --provider, --model, --mode, --effort, --agent, --engine, --json)
+swe eval <suite>   run a suite of tasks and report what was solved (--provider, --model, --task, --out, --keep)
 swe providers      list providers and where their keys come from
 swe models <id>    list the models of a provider
 swe key set|remove store or remove an API key

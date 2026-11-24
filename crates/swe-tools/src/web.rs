@@ -37,6 +37,7 @@ impl Default for WebFetch {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FetchArgs {
     url: String,
     #[serde(default)]

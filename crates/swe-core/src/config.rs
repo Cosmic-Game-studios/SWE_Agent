@@ -96,6 +96,18 @@ pub struct Config {
     pub max_steps_per_turn: u32,
     /// How many sub-agents deep delegation may go.
     pub max_agent_depth: u8,
+    /// Ask the agent to verify once when it wants to finish a turn in which it
+    /// changed files without running anything afterwards.
+    pub verify_before_finish: bool,
+    /// After a step that edited files, run the project's check (chosen from the
+    /// project type) where the permission mode allows commands unasked.
+    pub auto_check: bool,
+    /// The check to run instead of the automatically chosen one, for example
+    /// `make lint`.
+    pub check_command: Option<String>,
+    /// Keep the tools of MCP servers out of the model's context until the model
+    /// switches a server on with the `mcp_tools` tool.
+    pub dynamic_mcp_tools: bool,
     pub providers: BTreeMap<String, ProviderConfig>,
     pub mcp_servers: BTreeMap<String, McpServerConfig>,
 }
@@ -112,6 +124,10 @@ impl Default for Config {
             compact_threshold_tokens: 200_000,
             max_steps_per_turn: 1_000,
             max_agent_depth: 2,
+            verify_before_finish: true,
+            auto_check: true,
+            check_command: None,
+            dynamic_mcp_tools: true,
             providers: BTreeMap::new(),
             mcp_servers: BTreeMap::new(),
         }

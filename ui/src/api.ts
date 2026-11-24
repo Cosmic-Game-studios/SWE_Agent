@@ -113,6 +113,12 @@ export type EventKind =
   | { type: 'notice'; text: string }
   | { type: 'turn_finished'; outcome: TurnOutcome; usage: Usage };
 
+/** A point the files of a session can be rewound to: the user message `seq`. */
+export interface Checkpoint {
+  seq: number;
+  files: string[];
+}
+
 export type AgentEvent = { seq: number; ts: string; agent_id: string } & EventKind;
 
 export interface StreamingSnapshot {
@@ -277,6 +283,8 @@ export const api = {
   sendMessage: (id: string, text: string, images: ImageRef[] = []) =>
     request<{ queued: boolean }>('POST', `/sessions/${id}/messages`, { text, images }),
   cancel: (id: string) => request<{ ok: boolean }>('POST', `/sessions/${id}/cancel`, {}),
+  checkpoints: (id: string) => request<Checkpoint[]>('GET', `/sessions/${id}/checkpoints`),
+  rewind: (id: string, seq: number) => request<{ restored: string[] }>('POST', `/sessions/${id}/rewind`, { seq }),
   resolveApproval: (id: string, requestId: string, decision: ApprovalDecision, feedback?: string) =>
     request<{ ok: boolean }>('POST', `/sessions/${id}/approvals/${requestId}`, { decision, feedback }),
   diff: (id: string) => request<WorkspaceDiff>('GET', `/sessions/${id}/diff`),

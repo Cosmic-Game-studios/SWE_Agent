@@ -140,6 +140,14 @@ pub(crate) async fn compact(
             text.push_str(&format!("- {mark} {}\n", todo.content));
         }
     }
+    if spec.agent_id == swe_protocol::ROOT_AGENT {
+        // The notice that announced the permission mode is summarised away with the
+        // rest; without it the model no longer knows what it may do unasked.
+        text.push_str(&format!(
+            "\n\n<system-notice>\n{}\n</system-notice>",
+            crate::prompt::mode_notice(session.meta().mode)
+        ));
+    }
     let mut content = vec![ContentBlock::text(text)];
     match pending {
         Some(pending) => {
@@ -165,6 +173,47 @@ pub(crate) async fn compact(
         },
     );
     Ok(usage)
+}
+
+/// Messages at the end of the history whose tool results are never dropped.
+const KEEP_RECENT_MESSAGES: usize = 8;
+/// Tool results up to this size are not worth dropping.
+const PRUNE_ABOVE_CHARS: usize = 2_000;
+/// What stays of a dropped result, so the model still sees what it was.
+const PRUNED_HEAD_CHARS: usize = 300;
+
+/// Drop the bulk of old, large tool results and return roughly how many tokens
+/// that frees. It is the cheap step before a summary: the conversation stays
+/// word for word, only output the model has long since acted on goes.
+///
+/// Changing old messages invalidates the provider's prompt cache from that point,
+/// so this runs only when the context is full, not on every step.
+pub(crate) fn prune_tool_results(history: &mut [Message]) -> u64 {
+    let old = history.len().saturating_sub(KEEP_RECENT_MESSAGES);
+    let mut freed_chars = 0usize;
+    for message in &mut history[..old] {
+        for block in &mut message.content {
+            let ContentBlock::ToolResult { content, .. } = block else {
+                continue;
+            };
+            if content.len() <= PRUNE_ABOVE_CHARS {
+                continue;
+            }
+            let mut head = PRUNED_HEAD_CHARS;
+            while !content.is_char_boundary(head) {
+                head -= 1;
+            }
+            let pruned = format!(
+                "{}\n[... the rest of this output ({} characters) was dropped to save context. Run the tool \
+                 again if you need it.]",
+                &content[..head],
+                content.len() - head
+            );
+            freed_chars += content.len() - pruned.len();
+            *content = pruned;
+        }
+    }
+    freed_chars as u64 / CHARS_PER_TOKEN
 }
 
 /// Run the summarisation request. `Err(None)` means the user cancelled.
@@ -294,5 +343,35 @@ mod tests {
         assert!(clipped.contains("omitted"));
         assert!(clipped.len() < 1_200);
         assert_eq!(clip("short", 1_000), "short");
+    }
+}
+
+#[cfg(test)]
+mod prune_tests {
+    use super::*;
+
+    fn result(content: &str) -> Message {
+        Message {
+            role: Role::User,
+            content: vec![ContentBlock::tool_result("c", content, false)],
+        }
+    }
+
+    #[test]
+    fn old_large_tool_results_are_cut_and_recent_ones_kept() {
+        let big = "ä".repeat(5_000);
+        let mut history = vec![result(&big), result("small")];
+        history.extend((0..KEEP_RECENT_MESSAGES).map(|_| result(&big)));
+
+        let freed = prune_tool_results(&mut history);
+        assert!(freed > 2_000, "{freed}");
+        let text = |index: usize| match &history[index].content[0] {
+            ContentBlock::ToolResult { content, .. } => content.clone(),
+            _ => unreachable!(),
+        };
+        assert!(text(0).len() < 600 && text(0).contains("dropped to save context"));
+        assert_eq!(text(1), "small");
+        assert_eq!(text(2), big, "the recent tail is untouched");
+        assert_eq!(prune_tool_results(&mut history), 0, "nothing left to drop");
     }
 }

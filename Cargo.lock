@@ -1857,12 +1857,15 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "serde",
  "serde_json",
  "swe-core",
  "swe-llm",
  "swe-protocol",
  "swe-server",
+ "swe-tools",
  "tokio",
+ "toml",
  "tracing",
  "tracing-subscriber",
 ]

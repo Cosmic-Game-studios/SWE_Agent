@@ -201,6 +201,8 @@ impl Client {
 
 struct McpTool {
     client: Arc<Client>,
+    /// The configured name of the server, which is also the tool group.
+    server: String,
     /// Name exposed to the model.
     exposed: String,
     /// Name on the server.
@@ -236,6 +238,10 @@ impl Tool for McpTool {
 
     fn summarize(&self, input: &Value) -> String {
         swe_tools::text::truncate_line(&input.to_string(), 160)
+    }
+
+    fn group(&self) -> Option<&str> {
+        Some(&self.server)
     }
 
     async fn run(&self, input: Value, ctx: &ToolContext) -> ToolOutput {
@@ -340,6 +346,7 @@ impl McpHub {
                                 let Some(remote) = tool["name"].as_str() else { continue };
                                 started.tools.push(Arc::new(McpTool {
                                     client: client.clone(),
+                                    server: name.clone(),
                                     exposed: exposed_name(name, remote),
                                     remote: remote.to_string(),
                                     description: tool["description"].as_str().unwrap_or(remote).to_string(),

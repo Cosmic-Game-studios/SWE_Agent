@@ -13,6 +13,8 @@ use swe_protocol::{
 };
 use swe_server::ServeOptions;
 
+mod eval;
+
 #[derive(Parser)]
 #[command(
     name = "swe",
@@ -30,6 +32,8 @@ enum Command {
     Serve(ServeArgs),
     /// Run one task without the UI and print what the agent does.
     Run(RunArgs),
+    /// Run a suite of tasks with one model and report what it solved.
+    Eval(eval::EvalArgs),
     /// List providers and where their API keys come from.
     Providers,
     /// List the models a provider offers.
@@ -156,6 +160,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             .await?;
         }
         Command::Run(args) => return run_task(manager, args).await,
+        Command::Eval(args) => return eval::run(manager, args).await,
         Command::Providers => {
             for provider in manager.registry().list() {
                 let key = match &provider.key {

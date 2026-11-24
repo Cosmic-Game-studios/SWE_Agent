@@ -368,10 +368,13 @@ fn push_line(target: &mut String, line: &str) {
 fn demo_reply(request: &ChatRequest, scenarios: &[(String, String)]) -> MockReply {
     // The script lives in the most recent user message that carries text;
     // the step to play is the number of assistant turns since then.
-    let prompt_index = request
-        .messages
-        .iter()
-        .rposition(|m| m.role == Role::User && m.content.iter().any(|b| matches!(b, ContentBlock::Text { .. })));
+    let prompt_index = request.messages.iter().rposition(|m| {
+        // Notices the agent loop adds are not a new request from the user.
+        m.role == Role::User
+            && m.content
+                .iter()
+                .any(|b| matches!(b, ContentBlock::Text { text, .. } if !text.starts_with("<system-notice>")))
+    });
     let (prompt, step_index) = match prompt_index {
         Some(index) => (
             request.messages[index].text(),

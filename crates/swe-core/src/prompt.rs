@@ -67,7 +67,7 @@ Fix the root cause rather than the symptom.
 # Tools
 
 - Prefer the dedicated tools over shell equivalents: read_file, edit_file, write_file, glob and grep are \
-faster and safer than cat, sed, find and grep in bash.
+faster and safer than cat, sed, find and grep in bash. Several changes to one file go into one multi_edit call.
 - Issue independent tool calls together in one step; they run in parallel. Reading five files should be one \
 step, not five.
 - bash starts a fresh shell each time and has no terminal. Use non-interactive flags, and `background: true` \

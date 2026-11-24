@@ -322,11 +322,40 @@ async fn edits_wait_for_approval_and_respect_the_answer() {
     assert!(results[1].1.contains("not that file"));
     assert_eq!(session.meta().status, SessionStatus::Idle);
     // The model was told about the denial.
-    let last_request = h.requests().pop().unwrap();
+    let requests = h.requests();
+    let told = &requests[requests.len() - 2];
     assert!(matches!(
-        &last_request.messages.last().unwrap().content[0],
+        &told.messages.last().unwrap().content[0],
         ContentBlock::ToolResult { is_error: true, .. }
     ));
+    // A file was changed and nothing ran afterwards, so finishing is questioned once.
+    let last_request = requests.last().unwrap();
+    assert!(
+        last_request
+            .messages
+            .last()
+            .unwrap()
+            .text()
+            .contains("verify the change")
+    );
+}
+
+#[tokio::test]
+async fn finishing_is_not_questioned_when_a_command_ran_after_the_edit() {
+    let h = Harness::scripted();
+    let id = h.create(PermissionMode::FullAuto);
+    h.turn(
+        &id,
+        "!tool write_file {\"path\": \"a.txt\", \"content\": \"A\"}\n!then\n!tool bash {\"command\": \"echo checked\"}\n!then\n!say done",
+    )
+    .await;
+    let requests = h.requests();
+    assert_eq!(requests.len(), 3, "no extra round for a verified change");
+    assert!(
+        !requests
+            .iter()
+            .any(|r| r.messages.iter().any(|m| m.text().contains("verify the change")))
+    );
 }
 
 #[tokio::test]
@@ -690,7 +719,10 @@ async fn sub_agents_run_in_parallel_with_their_own_context_and_tools() {
         .find(|request| request.system.contains("read-only research agent"))
         .unwrap();
     let explore_tools: Vec<&str> = explore_request.tools.iter().map(|t| t.name.as_str()).collect();
-    assert_eq!(explore_tools, ["glob", "grep", "list_dir", "read_file", "web_fetch"]);
+    assert_eq!(
+        explore_tools,
+        ["glob", "grep", "list_dir", "read_file", "web_fetch", "web_search"]
+    );
     // Usage of the sub-agents is part of the session total.
     assert!(h.manager.get(&id).unwrap().meta().usage.output_tokens > 0);
 }
@@ -1139,4 +1171,136 @@ async fn a_missing_api_key_is_reported_as_a_turn_error() {
             .iter()
             .any(|event| matches!(&event.kind, EventKind::Error { message } if message.contains("unknown provider")))
     );
+}
+
+/// A minimal MCP server as a shell script: answers by matching on the request text.
+const FAKE_MCP_SERVER: &str = r#"
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"fake","version":"1"}}}\n' "$id";;
+    *'"method":"tools/list"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"echo","description":"Echo text","inputSchema":{"type":"object"},"annotations":{"readOnlyHint":true}}]}}\n' "$id";;
+    *'"name":"echo"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"echoed"}]}}\n' "$id";;
+  esac
+done
+"#;
+
+#[tokio::test]
+async fn mcp_tools_are_offered_only_while_their_server_is_switched_on() {
+    if std::process::Command::new("sh").args(["-c", "true"]).status().is_err() {
+        return; // No POSIX shell to run the fake server with.
+    }
+    let mut config = Config::default();
+    config.mcp_servers.insert(
+        "fake".to_string(),
+        swe_core::mcp::McpServerConfig {
+            command: "sh".into(),
+            args: vec!["-c".into(), FAKE_MCP_SERVER.into()],
+            ..Default::default()
+        },
+    );
+    let h = Harness::with_config(MockProvider::demo("mock").with_chunk_delay(Duration::ZERO), config);
+    let id = h.create(PermissionMode::FullAuto);
+    let echo = "!tool mcp__fake__echo {}";
+    let events = h
+        .turn(
+            &id,
+            &format!(
+                "{echo}\n!then\n!tool mcp_tools {{\"action\": \"enable\", \"server\": \"fake\"}}\n!then\n{echo}\n!then\n\
+                 !tool mcp_tools {{\"action\": \"disable\", \"server\": \"fake\"}}\n!then\n!say done"
+            ),
+        )
+        .await;
+
+    let offered = |request: usize| -> Vec<String> {
+        h.requests()[request]
+            .tools
+            .iter()
+            .map(|tool| tool.name.clone())
+            .collect()
+    };
+    let echo_tool = "mcp__fake__echo".to_string();
+    assert!(offered(0).contains(&"mcp_tools".to_string()));
+    assert!(!offered(0).contains(&echo_tool), "off until the model asks for it");
+    assert!(offered(2).contains(&echo_tool), "on after enable");
+    assert!(!offered(4).contains(&echo_tool), "off again after disable");
+
+    let results = tool_results(&events);
+    assert!(
+        results[0].2 && results[0].1.contains("switched off"),
+        "{}",
+        results[0].1
+    );
+    assert!(results[1].1.contains("mcp__fake__echo"), "{}", results[1].1);
+    assert_eq!(results[2].1, "echoed");
+}
+
+#[tokio::test]
+async fn file_edits_of_a_turn_can_be_rewound() {
+    let h = Harness::scripted();
+    std::fs::write(h.workspace.path().join("a.txt"), "original").unwrap();
+    let id = h.create(PermissionMode::FullAuto);
+    h.turn(
+        &id,
+        "!tool write_file {\"path\": \"a.txt\", \"content\": \"changed\"}\n!tool write_file {\"path\": \"new.txt\", \"content\": \"N\"}\n!then\n!say done",
+    )
+    .await;
+    assert_eq!(h.file("a.txt").as_deref(), Some("changed"));
+    let session = h.manager.get(&id).unwrap();
+    let checkpoints = session.checkpoints();
+    assert_eq!(checkpoints.len(), 1);
+    assert_eq!(checkpoints[0].files.len(), 2);
+
+    let restored = h.manager.rewind(&id, checkpoints[0].seq).unwrap();
+    assert_eq!(restored.len(), 2);
+    assert_eq!(h.file("a.txt").as_deref(), Some("original"));
+    assert_eq!(h.file("new.txt"), None, "a file the turn created is removed");
+    assert!(session.checkpoints().is_empty());
+    assert!(
+        h.manager.rewind(&id, checkpoints[0].seq).is_err(),
+        "nothing left to rewind"
+    );
+
+    // The conversation is kept, so the model is told what changed under it.
+    h.turn(&id, "!say ok").await;
+    let last = h.requests().pop().unwrap();
+    assert!(last.messages.last().unwrap().text().contains("The user rewound files"));
+}
+
+#[tokio::test]
+async fn a_failing_project_check_is_reported_with_the_edit() {
+    let config = Config {
+        check_command: Some("echo CHECK-SAYS-NO && exit 1".into()),
+        ..Default::default()
+    };
+    let script = "!tool write_file {\"path\": \"a.txt\", \"content\": \"A\"}\n!then\n!say done";
+    let edit_result = |h: &Harness| -> String {
+        h.requests()[1]
+            .messages
+            .last()
+            .unwrap()
+            .content
+            .iter()
+            .find_map(|block| match block {
+                ContentBlock::ToolResult { content, .. } => Some(content.clone()),
+                _ => None,
+            })
+            .unwrap()
+    };
+
+    let h = Harness::with_config(
+        MockProvider::demo("mock").with_chunk_delay(Duration::ZERO),
+        config.clone(),
+    );
+    let id = h.create(PermissionMode::FullAuto);
+    h.turn(&id, script).await;
+    let result = edit_result(&h);
+    assert!(result.contains("Automatic check"), "{result}");
+    assert!(result.contains("CHECK-SAYS-NO"), "{result}");
+
+    // Where commands need approval, the check does not run behind the user's back.
+    let h = Harness::with_config(MockProvider::demo("mock").with_chunk_delay(Duration::ZERO), config);
+    let id = h.create(PermissionMode::AutoEdit);
+    h.turn(&id, script).await;
+    assert!(!edit_result(&h).contains("Automatic check"));
 }

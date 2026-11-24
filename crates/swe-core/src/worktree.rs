@@ -161,6 +161,8 @@ mod tests {
             vec!["config", "user.email", "test@example.com"],
             vec!["config", "user.name", "Test"],
             vec!["config", "commit.gpgsign", "false"],
+            // The assertions compare file content byte for byte.
+            vec!["config", "core.autocrlf", "false"],
         ] {
             git(dir, &args).await.unwrap();
         }

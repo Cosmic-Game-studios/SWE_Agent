@@ -13,7 +13,7 @@
 //! watching: a client can disconnect, come back hours later, replay the
 //! event log from the last sequence number it saw and continue live.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
@@ -30,6 +30,7 @@ use tokio::sync::{broadcast, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::{self, AgentSpec, Env};
+use crate::checkpoint::{Checkpoint, Checkpoints};
 use crate::config::{Config, Paths, ProviderRegistry, write_atomic};
 use crate::mcp::McpHub;
 use crate::permissions::{PermissionPolicy, Rule};
@@ -140,6 +141,9 @@ struct StateFile {
     todos: Vec<Todo>,
     #[serde(default)]
     rules: Vec<Rule>,
+    /// Tool groups (MCP servers) the agent has switched on.
+    #[serde(default)]
+    tool_groups: BTreeSet<String>,
 }
 
 /// The model-facing conversation. Locked for the duration of a turn.
@@ -181,6 +185,11 @@ pub struct Session {
     steering: Mutex<VecDeque<UserInput>>,
     run: Mutex<Option<ActiveRun>>,
     todos: Mutex<Vec<Todo>>,
+    tool_groups: Mutex<BTreeSet<String>>,
+    checkpoints: Checkpoints,
+    /// Things that happened outside a turn and that the model has to be told
+    /// with the next user message.
+    notices: Mutex<Vec<String>>,
     /// Tells the manager that the metadata changed.
     notify: Notify,
 }
@@ -191,6 +200,7 @@ impl Session {
         let mut policy = PermissionPolicy::new(meta.mode, PathBuf::from(&meta.workspace));
         policy.rules = state.rules;
         let seq = events.last().map(|event| event.seq).unwrap_or(0).max(meta.last_seq);
+        let checkpoints = Checkpoints::new(&dir);
         Arc::new(Session {
             id: meta.id.clone(),
             dir,
@@ -213,6 +223,9 @@ impl Session {
             steering: Mutex::new(VecDeque::new()),
             run: Mutex::new(None),
             todos: Mutex::new(state.todos),
+            tool_groups: Mutex::new(state.tool_groups),
+            checkpoints,
+            notices: Mutex::new(Vec::new()),
             notify,
         })
     }
@@ -232,6 +245,70 @@ impl Session {
     pub(crate) fn set_todos(&self, agent_id: &str, todos: Vec<Todo>) {
         *self.todos.lock().unwrap() = todos.clone();
         self.emit(agent_id, EventKind::TodosUpdated { todos });
+    }
+
+    /// Whether the agent has switched this tool group on.
+    pub(crate) fn tool_group_active(&self, group: &str) -> bool {
+        self.tool_groups.lock().unwrap().contains(group)
+    }
+
+    pub(crate) fn set_tool_group(&self, group: &str, active: bool) {
+        let mut groups = self.tool_groups.lock().unwrap();
+        if active {
+            groups.insert(group.to_string());
+        } else {
+            groups.remove(group);
+        }
+    }
+
+    /// Remember what `path` contains before a tool of the running turn changes it.
+    pub(crate) fn checkpoint_file(&self, path: &Path) {
+        self.checkpoints.record(path);
+    }
+
+    /// The points the files of this session can be rewound to, oldest first.
+    pub fn checkpoints(&self) -> Vec<Checkpoint> {
+        self.checkpoints.list()
+    }
+
+    /// Put the files back to what they were before the user message `seq`,
+    /// undoing the file edits of that turn and of every later one. The
+    /// conversation is kept; the model is told with the next message.
+    pub fn rewind(&self, seq: u64) -> Result<Vec<PathBuf>, SessionError> {
+        if self.is_running() {
+            return Err(SessionError::Invalid(
+                "the agent is working; stop it before rewinding files".into(),
+            ));
+        }
+        let restored = self.checkpoints.rewind(seq)?;
+        if restored.is_empty() {
+            return Err(SessionError::Invalid("there is nothing to rewind at that point".into()));
+        }
+        let workspace = self.workspace();
+        let names: Vec<String> = restored
+            .iter()
+            .map(|path| swe_tools::display_path(&workspace, path))
+            .collect();
+        let files = names.join(", ");
+        self.emit(
+            ROOT_AGENT,
+            EventKind::Notice {
+                text: format!(
+                    "Rewound {} file{}: {files}",
+                    names.len(),
+                    if names.len() == 1 { "" } else { "s" }
+                ),
+            },
+        );
+        self.notices.lock().unwrap().push(format!(
+            "The user rewound files to an earlier state, undoing edits you made: {files}. Read them again before \
+             you rely on their content."
+        ));
+        Ok(restored)
+    }
+
+    pub(crate) fn take_notices(&self) -> Vec<String> {
+        std::mem::take(&mut self.notices.lock().unwrap())
     }
 
     pub(crate) fn shell(&self) -> Arc<ShellManager> {
@@ -388,6 +465,7 @@ impl Session {
             announced_mode: Option<PermissionMode>,
             todos: Vec<Todo>,
             rules: Vec<Rule>,
+            tool_groups: BTreeSet<String>,
         }
         let view = View {
             system_prompt,
@@ -395,6 +473,7 @@ impl Session {
             announced_mode,
             todos: self.todos(),
             rules: self.policy().rules.clone(),
+            tool_groups: self.tool_groups.lock().unwrap().clone(),
         };
         match serde_json::to_vec(&view) {
             Ok(bytes) => {
@@ -812,6 +891,14 @@ impl SessionManager {
         Ok(false)
     }
 
+    pub fn checkpoints(&self, id: &str) -> Result<Vec<Checkpoint>, SessionError> {
+        Ok(self.get(id)?.checkpoints())
+    }
+
+    pub fn rewind(&self, id: &str, seq: u64) -> Result<Vec<PathBuf>, SessionError> {
+        self.get(id)?.rewind(seq)
+    }
+
     pub fn cancel(&self, id: &str) -> Result<(), SessionError> {
         self.get(id)?.cancel();
         Ok(())
@@ -915,13 +1002,14 @@ async fn run_turn(inner: &Arc<ManagerInner>, session: &Arc<Session>, input: User
     let meta = session.meta();
     let usage_before = meta.usage;
     session.set_status(SessionStatus::Running, None);
-    session.emit(
+    let accepted = session.emit(
         ROOT_AGENT,
         EventKind::UserMessage {
             text: input.text.clone(),
             images: input.images.clone(),
         },
     );
+    session.checkpoints.begin(accepted.seq);
     session.emit(
         ROOT_AGENT,
         EventKind::TurnStarted {
@@ -1028,9 +1116,12 @@ async fn run_native_turn(
         effort: meta.effort,
         system: conversation.system_prompt.clone(),
         tools: subagent::root_tools(env, &identity, &config).await,
+        check_command: crate::diagnostics::check_command(&config, &workspace),
         cwd: workspace,
         context_limit: context_limit(&config, context_window),
         max_steps: config.max_steps_per_turn,
+        verify_before_finish: config.verify_before_finish,
+        dynamic_tool_groups: config.dynamic_mcp_tools,
     };
 
     repair_history(&mut conversation.messages);
@@ -1042,6 +1133,11 @@ async fn run_native_turn(
             prompt::mode_notice(meta.mode)
         )));
         conversation.announced_mode = Some(meta.mode);
+    }
+    for notice in session.take_notices() {
+        blocks.push(ContentBlock::text(format!(
+            "<system-notice>\n{notice}\n</system-notice>"
+        )));
     }
     blocks.extend(input.into_blocks());
     match conversation.messages.last_mut() {

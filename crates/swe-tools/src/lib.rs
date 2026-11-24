@@ -18,6 +18,7 @@ pub mod search;
 pub mod shell;
 pub mod text;
 pub mod web;
+pub mod websearch;
 
 pub use shell::ShellManager;
 
@@ -186,6 +187,12 @@ pub trait Tool: Send + Sync {
         Vec::new()
     }
 
+    /// A set of tools that is switched on and off together, such as the tools of
+    /// one MCP server. Tools without a group are always available.
+    fn group(&self) -> Option<&str> {
+        None
+    }
+
     async fn run(&self, input: Value, ctx: &ToolContext) -> ToolOutput;
 
     fn spec(&self) -> ToolSpec {
@@ -226,6 +233,7 @@ impl ToolRegistry {
         registry.add(Arc::new(fs::ReadFile));
         registry.add(Arc::new(fs::WriteFile));
         registry.add(Arc::new(fs::EditFile));
+        registry.add(Arc::new(fs::MultiEdit));
         registry.add(Arc::new(fs::ListDir));
         registry.add(Arc::new(search::Glob));
         registry.add(Arc::new(search::Grep));
@@ -233,6 +241,7 @@ impl ToolRegistry {
         registry.add(Arc::new(shell::BashOutput));
         registry.add(Arc::new(shell::KillProcess));
         registry.add(Arc::new(web::WebFetch::new()));
+        registry.add(Arc::new(websearch::WebSearch::new()));
         registry
     }
 
@@ -258,9 +267,23 @@ impl ToolRegistry {
     /// Specs sorted by name: a deterministic order keeps provider prompt
     /// caches valid across requests and restarts.
     pub fn specs(&self) -> Vec<ToolSpec> {
-        let mut specs: Vec<ToolSpec> = self.tools.iter().map(|tool| tool.spec()).collect();
+        self.specs_where(|_| true)
+    }
+
+    /// Like [`specs`](Self::specs), for the tools `keep` accepts.
+    pub fn specs_where(&self, keep: impl Fn(&dyn Tool) -> bool) -> Vec<ToolSpec> {
+        let mut specs: Vec<ToolSpec> = self
+            .tools
+            .iter()
+            .filter(|tool| keep(tool.as_ref()))
+            .map(|tool| tool.spec())
+            .collect();
         specs.sort_by(|a, b| a.name.cmp(&b.name));
         specs
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Arc<dyn Tool>> {
+        self.tools.iter()
     }
 }
 
@@ -302,8 +325,10 @@ mod tests {
                 "grep",
                 "kill_process",
                 "list_dir",
+                "multi_edit",
                 "read_file",
                 "web_fetch",
+                "web_search",
                 "write_file"
             ]
         );

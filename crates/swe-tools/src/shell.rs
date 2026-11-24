@@ -374,6 +374,7 @@ fn unknown_process(id: &str, known: &[String]) -> String {
 pub struct Bash;
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct BashArgs {
     command: String,
     #[serde(default)]
@@ -562,6 +563,7 @@ impl Tool for Bash {
 pub struct BashOutput;
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ProcessArgs {
     id: String,
 }

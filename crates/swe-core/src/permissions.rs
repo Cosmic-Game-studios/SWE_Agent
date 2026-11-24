@@ -266,9 +266,20 @@ impl PermissionPolicy {
                 {
                     return Verdict::Allow;
                 }
+                // A call without a URL (a web search) is granted per tool instead of per host.
+                if host.is_none()
+                    && self
+                        .rules
+                        .iter()
+                        .any(|rule| matches!(rule, Rule::Tool { name: allowed } if allowed == name))
+                {
+                    return Verdict::Allow;
+                }
                 Verdict::Ask {
                     reason: "Network access needs approval in this mode".to_string(),
-                    always: host.map(|host| Rule::Host { host }),
+                    always: Some(
+                        host.map_or_else(|| Rule::Tool { name: name.to_string() }, |host| Rule::Host { host }),
+                    ),
                 }
             }
             // Everything else that acts on the outside world (MCP tools, ...).
@@ -323,8 +334,9 @@ mod tests {
                 reason,
                 always: Some(Rule::Path { root }),
             } => {
-                assert!(reason.contains("/etc/passwd"));
-                assert_eq!(root, Path::new("/etc"));
+                // Separators differ by platform; the file name does not.
+                assert!(reason.contains("passwd"));
+                assert!(root.ends_with("etc"), "{root:?}");
             }
             other => panic!("expected ask, got {other:?}"),
         }

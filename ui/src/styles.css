@@ -925,6 +925,38 @@ button.chip[aria-expanded='true'] {
   }
 }
 
+.rewind-trigger {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-end;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.rewind-trigger:hover {
+  color: var(--accent);
+}
+
+.rewind-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.rewind-confirm > span {
+  flex: 1 1 240px;
+}
+
 .user-text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;

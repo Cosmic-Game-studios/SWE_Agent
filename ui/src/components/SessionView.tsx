@@ -163,7 +163,7 @@ export function SessionView({ id, onOpenSettings }: { id: string; onOpenSettings
                 </div>
               </div>
             ) : (
-              <AgentTimeline agentId={ROOT} view={view} sessionId={id} />
+              <AgentTimeline agentId={ROOT} view={view} sessionId={id} checkpoints={running ? undefined : store.checkpoints} />
             )}
             {meta.status === 'interrupted' ? (
               <div className="notice">

@@ -52,6 +52,7 @@ fn compile_glob(pattern: &str) -> Result<GlobMatcher, String> {
 pub struct Glob;
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct GlobArgs {
     pattern: String,
     #[serde(default)]
@@ -161,6 +162,7 @@ impl Tool for Glob {
 pub struct Grep;
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct GrepArgs {
     pattern: String,
     #[serde(default)]
